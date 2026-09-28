@@ -127,6 +127,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("data/musinsa/tops"))
     parser.add_argument("--max-pages", type=int, default=None, help="omit to crawl every page")
     parser.add_argument("--max-products", type=int, default=None)
+    parser.add_argument(
+        "--sort", default="POPULAR",
+        help="Musinsa sortCode for the first page (POPULAR, SALE_ONE_DAY, NEW, ...). "
+             "Subsequent pages follow the signed nextPageUrl, which carries the sort.",
+    )
     parser.add_argument("--delay", type=float, default=1.0, help="seconds between list requests")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--retries", type=int, default=3)
@@ -149,8 +154,9 @@ def main() -> int:
     saved_this_run = 0
     page_count = 0
 
-    print(f"Fetching category: {CATEGORY_URL}", flush=True)
-    page = parse_initial_page(fetcher.get(CATEGORY_URL))
+    start_url = CATEGORY_URL + (f"&sortCode={args.sort}" if args.sort else "")
+    print(f"Fetching category: {start_url}", flush=True)
+    page = parse_initial_page(fetcher.get(start_url))
     print(f"Musinsa reports {page.total_count:,} tops across {page.total_pages:,} pages", flush=True)
 
     while True:

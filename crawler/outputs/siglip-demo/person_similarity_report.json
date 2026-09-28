@@ -1,0 +1,40 @@
+{
+  "model": "Marqo/marqo-fashionSigLIP",
+  "embedding_dim": 768,
+  "query": "7008226_person.webp",
+  "expected_match": "7008226",
+  "used_top_mask": true,
+  "top_ratio": 0.2723,
+  "ranking_best_of_box_masked": [
+    {
+      "goods_no": "7008226",
+      "similarity": 0.8197,
+      "sim_box": 0.8197,
+      "sim_masked": 0.6989
+    },
+    {
+      "goods_no": "7037384",
+      "similarity": 0.6366,
+      "sim_box": 0.6366,
+      "sim_masked": 0.6153
+    },
+    {
+      "goods_no": "7035474",
+      "similarity": 0.6077,
+      "sim_box": 0.6077,
+      "sim_masked": 0.5616
+    },
+    {
+      "goods_no": "7101703",
+      "similarity": 0.5764,
+      "sim_box": 0.53,
+      "sim_masked": 0.5764
+    },
+    {
+      "goods_no": "7095079",
+      "similarity": 0.5016,
+      "sim_box": 0.5016,
+      "sim_masked": 0.4911
+    }
+  ]
+}
