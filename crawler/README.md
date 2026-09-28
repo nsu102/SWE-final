@@ -90,4 +90,4 @@ work/.venv/bin/python -m src.ably.crawl_products \
 
 ## 백엔드
 
-검색 API, 임베딩 적재, PostgreSQL/pgvector 및 EC2 배포 코드는 이 크롤러와 분리해 형제 저장소 `../SWE-backend`로 옮겼습니다. 두 저장소는 파일 경로로 결합하지 않으며, 백엔드는 이 저장소가 생성한 `products.csv`와 `selected/selections.jsonl`의 경로를 인자로 받아 적재합니다.
+검색 API, 임베딩 적재, PostgreSQL/pgvector 및 EC2 배포 코드는 이 크롤러와 분리해 `../backend`에 있습니다. 백엔드는 이 저장소가 생성한 `products.csv`와 `selected/selections.jsonl`의 경로를 인자로 받아 적재합니다.
