@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -47,6 +47,51 @@ export default function Home() {
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [stream, setStream] = useState<MediaStream>();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Attach the live camera to <video>; stopping tracks here also covers cancel/capture/unmount.
+  useEffect(() => {
+    if (!stream) return;
+    videoRef.current!.srcObject = stream;
+    return () => stream.getTracks().forEach((track) => track.stop());
+  }, [stream]);
+
+  async function openCamera() {
+    setError(undefined);
+    try {
+      setStream(
+        await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        }),
+      );
+    } catch (e) {
+      const name = (e as Error).name;
+      setError(
+        name === "NotAllowedError"
+          ? "브라우저에서 카메라 권한을 허용해 주세요."
+          : name === "NotFoundError"
+            ? "연결된 카메라가 없습니다."
+            : "카메라를 열 수 없습니다. (HTTPS 또는 localhost에서만 동작합니다)",
+      );
+    }
+  }
+
+  function capture() {
+    const video = videoRef.current!;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        setStream(undefined);
+        if (blob) search(new File([blob], "camera.jpg", { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.92,
+    );
+  }
 
   async function search(file: File | undefined) {
     if (!file || loading) return;
@@ -88,35 +133,74 @@ export default function Home() {
         Find the top.
       </h1>
       <p className="mt-2 mb-7 text-muted">
-        전신 사진을 올리면 상의 영역을 분리하고 등록된 상품 중 비슷한 옷을 찾습니다.
+        사진을 올리거나 카메라로 찍으면 상의 영역을 분리하고 등록된 상품 중 비슷한 옷을 찾습니다.
       </p>
 
-      <label
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        className={`flex min-h-40 cursor-pointer flex-col items-center justify-center gap-2 border border-dashed p-8 text-center transition-colors focus-within:outline-2 focus-within:outline-ink ${
-          dragging ? "border-ink bg-well" : "border-line bg-card hover:bg-well/60"
-        } ${loading ? "cursor-wait opacity-60" : ""}`}
-      >
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="sr-only"
-          disabled={loading}
-          onChange={(e) => {
-            search(e.target.files?.[0]);
-            e.target.value = "";
-          }}
-        />
-        <span className="font-bold">
-          {loading ? "검색 중…" : "사진을 끌어다 놓거나 클릭해서 선택하세요"}
-        </span>
-        <span className="text-sm text-muted">JPG · PNG · WEBP, 최대 10MB</span>
-      </label>
+      {stream ? (
+        <div className="relative grid place-items-center bg-black">
+          {/* Mirrored like a selfie view; the captured frame keeps the real orientation. */}
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="max-h-[70vh] w-full -scale-x-100 object-contain"
+          />
+          <div className="absolute inset-x-0 bottom-5 flex justify-center gap-3">
+            <button
+              type="button"
+              onClick={capture}
+              className="rounded-full bg-white px-10 py-3.5 font-bold text-ink shadow-lg focus-visible:outline-2 focus-visible:outline-white"
+            >
+              찰칵
+            </button>
+            <button
+              type="button"
+              onClick={() => setStream(undefined)}
+              className="rounded-full bg-black/60 px-6 py-3.5 text-white focus-visible:outline-2 focus-visible:outline-white"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`flex min-h-40 flex-1 cursor-pointer flex-col items-center justify-center gap-2 border border-dashed p-8 text-center transition-colors focus-within:outline-2 focus-within:outline-ink ${
+              dragging ? "border-ink bg-well" : "border-line bg-card hover:bg-well/60"
+            } ${loading ? "cursor-wait opacity-60" : ""}`}
+          >
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              disabled={loading}
+              onChange={(e) => {
+                search(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <span className="font-bold">
+              {loading ? "검색 중…" : "사진을 끌어다 놓거나 클릭해서 선택하세요"}
+            </span>
+            <span className="text-sm text-muted">JPG · PNG · WEBP, 최대 10MB</span>
+          </label>
+          <button
+            type="button"
+            onClick={openCamera}
+            disabled={loading}
+            className="bg-ink px-8 py-4 font-bold text-white transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-45 sm:w-52"
+          >
+            카메라로 찍기
+          </button>
+        </div>
+      )}
 
       <p aria-live="polite" className={`mt-3.5 min-h-6 ${error ? "text-red-700" : "text-muted"}`}>
         {status}

@@ -27,9 +27,9 @@ make db-up
 로컬 DB는 `pgvector/pgvector:pg16` 컨테이너로 실행되며 `127.0.0.1:5432`에서만 접근할 수 있습니다. 최초 볼륨 생성 시 아래 순서로 자동 초기화됩니다.
 
 1. `src/backend/schema.sql`: `vector` 확장, 상품·검색 이력 테이블, HNSW 인덱스 생성
-2. `seed/002-musinsa-900.sql.gz`: 무신사 상품 900개와 FashionSigLIP 임베딩 적재
+2. `seed/catalog-*.sql.gz`: S3에 올라간 무신사 상품 전체(49,705개)와 FashionSigLIP 임베딩 적재 (`scripts/load_seed.sh`)
 
-따라서 새로 clone한 환경에서는 `make db-up`만 실행해도 검색 가능한 900개가 DB에 들어갑니다. 압축 시드에는 상품 메타데이터, S3 object key, 768차원 임베딩만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
+따라서 새로 clone한 환경에서는 `make db-up`만 실행해도 전체 카탈로그가 DB에 들어갑니다. 첫 기동은 HNSW 인덱스 생성 때문에 몇 분 걸리며, 적재가 끝나야 healthy가 됩니다. 압축 시드에는 상품 메타데이터, S3 object key, 768차원 임베딩(소수 4자리 반올림, 검색 순위 영향 없음)만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
 
 ```bash
 make db-status # 상태 확인
@@ -83,9 +83,9 @@ work/.venv/bin/python -m src.jobs.index_catalog \
 
 `--limit`을 제거하면 선택 완료 상품 전체를 upsert합니다. EC2에서는 access key를 파일에 넣지 말고 S3 읽기 권한이 있는 IAM Role을 인스턴스에 연결하는 방식을 권장합니다.
 
-### 무신사 900개 시드
+### 신규 상품 적재와 시드 갱신
 
-로컬 DB의 기존 무신사 상품을 포함해 총 900개가 되도록 채웁니다. 크롤러 저장소와 S3 이미지를 자동으로 찾아 사용하며, 이미 DB에 있는 상품은 임베딩을 다시 계산하지 않습니다. 중간에 중단되어도 같은 명령을 다시 실행하면 남은 상품부터 이어집니다.
+크롤러가 새로 선별한 상품 중 DB에 없는 것만 임베딩합니다. 크롤러 결과(`../crawler/data`, 없으면 `data/` 스냅샷)와 S3 이미지를 자동으로 찾아 사용하며, 이미 DB에 있는 상품은 임베딩을 다시 계산하지 않습니다. 중간에 중단되어도 같은 명령을 다시 실행하면 남은 상품부터 이어집니다.
 
 ```bash
 # 다운로드·임베딩 없이 대상 개수만 확인
@@ -99,10 +99,10 @@ make seed-musinsa
 
 ```bash
 CRAWLER_ROOT=/absolute/path/to/crawler make seed-musinsa
-SEED_LIMIT=900 SEED_BATCH_SIZE=16 make seed-musinsa
+SEED_LIMIT=60000 SEED_BATCH_SIZE=16 make seed-musinsa   # DB 총개수 상한
 ```
 
-실행 계획은 `available`, `existing`, `to_index`, `target` 순서로 출력됩니다. 목표 900개가 이미 적재되어 있으면 아무 작업도 하지 않습니다.
+실행 계획은 `available`, `existing`, `to_index`, `target` 순서로 출력됩니다. 적재 후 `make seed-dump`로 시드 파일을 다시 만들어 커밋하면 팀원도 `make db-reset`으로 같은 카탈로그를 받습니다.
 
 ## EC2/RDS 배포
 

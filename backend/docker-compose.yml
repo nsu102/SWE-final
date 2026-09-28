@@ -13,13 +13,14 @@ services:
     volumes:
       - fashion_postgres_data:/var/lib/postgresql/data
       - ./src/backend/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
-      - ./seed/002-musinsa-900.sql.gz:/docker-entrypoint-initdb.d/002-musinsa-900.sql.gz:ro
+      - ./scripts/load_seed.sh:/docker-entrypoint-initdb.d/002-load-seed.sh:ro
+      - ./seed:/seed:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 20
-      start_period: 5s
+      start_period: 10m  # first init loads the whole catalog
 
 volumes:
   fashion_postgres_data:

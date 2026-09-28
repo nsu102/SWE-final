@@ -36,9 +36,11 @@ args=(
   --products "$data_root/musinsa/tops/products.csv"
   --selections "$data_root/musinsa/tops/selected/selections.jsonl"
   --batch-size "${SEED_BATCH_SIZE:-16}"
-  --target-count "${SEED_LIMIT:-900}"
   --skip-existing
 )
+if [[ -n "${SEED_LIMIT:-}" ]]; then
+  args+=(--target-count "$SEED_LIMIT")
+fi
 if [[ "${SEED_DRY_RUN:-0}" == "1" ]]; then
   args+=(--dry-run)
 fi
