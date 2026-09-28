@@ -1,6 +1,6 @@
 # SWE Backend
 
-상의 사진에서 옷 영역을 추출하고 FashionCLIP 임베딩으로 유사 상품을 검색하는 독립 백엔드 저장소입니다. 상품 원본은 로컬 또는 S3에 둘 수 있고, 상품 정보와 512차원 벡터는 PostgreSQL + pgvector에 저장합니다.
+상의 사진에서 옷 영역을 추출하고 Marqo FashionSigLIP 임베딩으로 유사 상품을 검색하는 백엔드입니다. 상품 원본은 로컬 또는 S3에 둘 수 있고, 상품 정보와 768차원 벡터는 PostgreSQL + pgvector에 저장합니다.
 
 ## 구성
 
@@ -27,9 +27,9 @@ make db-up
 로컬 DB는 `pgvector/pgvector:pg16` 컨테이너로 실행되며 `127.0.0.1:5432`에서만 접근할 수 있습니다. 최초 볼륨 생성 시 아래 순서로 자동 초기화됩니다.
 
 1. `src/backend/schema.sql`: `vector` 확장, 상품·검색 이력 테이블, HNSW 인덱스 생성
-2. `seed/002-musinsa-900.sql.gz`: 무신사 상품 900개와 FashionCLIP 임베딩 적재
+2. `seed/002-musinsa-900.sql.gz`: 무신사 상품 900개와 FashionSigLIP 임베딩 적재
 
-따라서 GitHub에서 이 저장소만 clone한 새 환경에서는 `make db-up`만 실행해도 검색 가능한 900개가 DB에 들어갑니다. 압축 시드에는 상품 메타데이터, S3 object key, 512차원 임베딩만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
+따라서 새로 clone한 환경에서는 `make db-up`만 실행해도 검색 가능한 900개가 DB에 들어갑니다. 압축 시드에는 상품 메타데이터, S3 object key, 768차원 임베딩만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
 
 ```bash
 make db-status # 상태 확인
@@ -64,7 +64,6 @@ work/.venv/bin/uvicorn src.backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 - API 문서: `http://127.0.0.1:8000/docs`
-- 웹 검색 테스트: `http://127.0.0.1:8000/`
 - 생존 확인: `GET /health/live`
 - DB 포함 상태 확인: `GET /health`
 - 이미지 검색: `POST /api/search?limit=20&platform=musinsa`
@@ -77,8 +76,8 @@ work/.venv/bin/uvicorn src.backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```bash
 work/.venv/bin/python -m src.jobs.index_catalog \
   --platform musinsa \
-  --products ../SWE-crawl/data/musinsa/tops/products.csv \
-  --selections ../SWE-crawl/data/musinsa/tops/selected/selections.jsonl \
+  --products ../crawler/data/musinsa/tops/products.csv \
+  --selections ../crawler/data/musinsa/tops/selected/selections.jsonl \
   --limit 5
 ```
 
@@ -99,7 +98,7 @@ make seed-musinsa
 크롤러 저장소를 자동으로 찾지 못하면 경로를 지정합니다. 목표 개수와 배치 크기도 변경할 수 있습니다.
 
 ```bash
-CRAWLER_ROOT=/absolute/path/to/SWE-crawl make seed-musinsa
+CRAWLER_ROOT=/absolute/path/to/crawler make seed-musinsa
 SEED_LIMIT=900 SEED_BATCH_SIZE=16 make seed-musinsa
 ```
 

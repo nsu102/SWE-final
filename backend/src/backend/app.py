@@ -87,11 +87,6 @@ def preview_data_url(image: Image.Image) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
-@app.get("/", include_in_schema=False)
-def web_test():
-    return FileResponse(Path(__file__).with_name("static") / "index.html")
-
-
 @app.post("/api/search", response_model=SearchResponse)
 async def search(
     image: UploadFile = File(...),

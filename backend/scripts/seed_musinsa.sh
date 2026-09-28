@@ -3,24 +3,11 @@ set -euo pipefail
 
 backend_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_root="$(dirname "$backend_root")"
-crawler_root="${CRAWLER_ROOT:-}"
-
-if [[ -z "$crawler_root" && -d "$workspace_root/SWE-crawl" ]]; then
-  crawler_root="$workspace_root/SWE-crawl"
-fi
-
-if [[ -z "$crawler_root" ]]; then
-  while IFS= read -r git_config; do
-    if grep -Eq 'github\.com[:/]nsu102/SWE-crawl(\.git)?' "$git_config"; then
-      crawler_root="$(dirname "$(dirname "$git_config")")"
-      break
-    fi
-  done < <(find "$workspace_root" -mindepth 3 -maxdepth 3 -path '*/.git/config' -type f -print)
-fi
-
-if [[ -z "$crawler_root" || ! -f "$crawler_root/data/musinsa/tops/products.csv" ]]; then
-  echo "SWE-crawl data not found. Set CRAWLER_ROOT=/absolute/path/to/SWE-crawl." >&2
-  exit 1
+crawler_root="${CRAWLER_ROOT:-$workspace_root/crawler}"
+data_root="$crawler_root/data"
+if [[ ! -f "$data_root/musinsa/tops/products.csv" ]]; then
+  # ponytail: fall back to the catalog snapshot committed under backend/data
+  data_root="$backend_root/data"
 fi
 
 set -a
@@ -46,8 +33,8 @@ fi
 
 args=(
   --platform musinsa
-  --products "$crawler_root/data/musinsa/tops/products.csv"
-  --selections "$crawler_root/data/musinsa/tops/selected/selections.jsonl"
+  --products "$data_root/musinsa/tops/products.csv"
+  --selections "$data_root/musinsa/tops/selected/selections.jsonl"
   --batch-size "${SEED_BATCH_SIZE:-16}"
   --target-count "${SEED_LIMIT:-900}"
   --skip-existing

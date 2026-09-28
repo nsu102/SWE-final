@@ -1,3 +1,4 @@
+name: swe-backend  # ponytail: keeps the pre-monorepo volume (swe-backend_fashion_postgres_data)
 services:
   postgres:
     image: pgvector/pgvector:pg16
