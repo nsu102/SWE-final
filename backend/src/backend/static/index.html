@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>상의 유사 상품 검색</title>
+  <style>
+    :root { color-scheme: light; font-family: "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f1ea; color: #171714; }
+    main { width: min(1080px, calc(100% - 32px)); margin: 48px auto 80px; }
+    h1 { margin: 0 0 8px; font-family: Georgia, serif; font-size: clamp(32px, 6vw, 64px); font-weight: 500; }
+    .lead { margin: 0 0 28px; color: #646158; }
+    .panel { padding: 22px; border: 1px solid #cbc6ba; background: #fffdf8; }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    input[type=file] { flex: 1; min-width: 240px; padding: 13px; border: 1px solid #aaa59a; background: white; }
+    button { border: 0; padding: 14px 24px; background: #171714; color: white; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: wait; }
+    #status { min-height: 24px; margin: 14px 0 0; color: #656158; }
+    .previews { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; }
+    .preview { min-height: 220px; background: #e8e4da; display: grid; place-items: center; position: relative; overflow: hidden; }
+    .preview span { position: absolute; left: 8px; top: 8px; padding: 5px 8px; background: rgba(0,0,0,.72); color: white; font-size: 12px; }
+    .preview img { width: 100%; height: 300px; object-fit: contain; }
+    h2 { margin: 42px 0 16px; font-family: Georgia, serif; font-size: 28px; font-weight: 500; }
+    #results { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .card { color: inherit; text-decoration: none; background: #fffdf8; border: 1px solid #d4cfc4; transition: transform .15s ease; }
+    .card:hover { transform: translateY(-3px); }
+    .card img { display: block; width: 100%; aspect-ratio: 4/5; object-fit: contain; background: white; }
+    .copy { padding: 12px; }
+    .brand, .score { color: #777267; font-size: 12px; }
+    .name { min-height: 42px; margin: 5px 0; font-size: 14px; line-height: 1.45; }
+    .price { font-weight: 700; }
+    @media (max-width: 760px) { .previews { grid-template-columns: 1fr; } #results { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Find the top.</h1>
+    <p class="lead">전신 사진을 넣으면 상의 영역을 분리하고 현재 등록된 900개 상품에서 유사한 옷을 찾습니다.</p>
+    <section class="panel">
+      <form id="form">
+        <div class="controls">
+          <input id="file" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+          <button id="submit" type="submit">검색</button>
+        </div>
+      </form>
+      <p id="status">사진을 선택하세요.</p>
+      <div class="previews">
+        <div class="preview"><span>원본</span><img id="original" alt="업로드 원본"></div>
+        <div class="preview"><span>BOX CROP</span><img id="box" alt="상의 박스 크롭"></div>
+        <div class="preview"><span>MASK CROP</span><img id="mask" alt="상의 마스크 크롭"></div>
+      </div>
+    </section>
+    <h2>검색 결과</h2>
+    <section id="results"></section>
+  </main>
+  <script>
+    const form = document.querySelector('#form');
+    const file = document.querySelector('#file');
+    const submit = document.querySelector('#submit');
+    const status = document.querySelector('#status');
+    const original = document.querySelector('#original');
+    const box = document.querySelector('#box');
+    const mask = document.querySelector('#mask');
+    const results = document.querySelector('#results');
+    let objectUrl;
+
+    file.addEventListener('change', () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (!file.files[0]) return;
+      objectUrl = URL.createObjectURL(file.files[0]);
+      original.src = objectUrl;
+      box.removeAttribute('src');
+      mask.removeAttribute('src');
+      results.replaceChildren();
+      status.textContent = '검색할 준비가 됐습니다.';
+    });
+
+    function resultCard(item) {
+      const link = document.createElement('a');
+      link.className = 'card';
+      link.href = item.product_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      const image = document.createElement('img');
+      image.src = item.image_url;
+      image.alt = item.goods_name;
+      image.loading = 'lazy';
+      const copy = document.createElement('div');
+      copy.className = 'copy';
+      const brand = document.createElement('div');
+      brand.className = 'brand';
+      brand.textContent = item.brand_name || item.platform;
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = item.goods_name;
+      const price = document.createElement('div');
+      price.className = 'price';
+      price.textContent = item.price == null ? '가격 정보 없음' : `${item.price.toLocaleString('ko-KR')}원`;
+      const score = document.createElement('div');
+      score.className = 'score';
+      score.textContent = `유사도 ${(item.similarity * 100).toFixed(1)}%`;
+      copy.append(brand, name, price, score);
+      link.append(image, copy);
+      return link;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!file.files[0]) return;
+      submit.disabled = true;
+      results.replaceChildren();
+      status.textContent = '상의 영역을 찾고 임베딩을 계산하고 있습니다. 첫 검색은 모델 로딩 때문에 오래 걸릴 수 있습니다.';
+      const data = new FormData();
+      data.append('image', file.files[0]);
+      try {
+        const response = await fetch('/api/search?limit=12&platform=musinsa', { method: 'POST', body: data });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || '검색에 실패했습니다.');
+        box.src = payload.box_preview;
+        if (payload.masked_preview) mask.src = payload.masked_preview;
+        else mask.removeAttribute('src');
+        payload.results.forEach(item => results.append(resultCard(item)));
+        const maskState = payload.used_top_mask ? `상의 비율 ${(payload.top_ratio * 100).toFixed(1)}%` : '상의 마스크를 찾지 못해 원본 사용';
+        status.textContent = `${maskState} · ${payload.elapsed_ms.toLocaleString('ko-KR')}ms · ${payload.results.length}개 결과`;
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

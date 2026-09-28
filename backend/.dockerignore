@@ -1,0 +1,11 @@
+.git
+.env
+**/.env
+work
+data
+storage
+seed
+logs
+outputs
+**/__pycache__
+deploy/backend/certs

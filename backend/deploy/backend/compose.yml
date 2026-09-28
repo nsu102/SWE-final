@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - model-cache:/app/cache
+      - local-storage:/app/storage
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  model-cache:
+  local-storage:

@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: fashion-search-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fashion}
+      POSTGRES_USER: ${POSTGRES_USER:-fashion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fashion}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - fashion_postgres_data:/var/lib/postgresql/data
+      - ./src/backend/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./seed/002-musinsa-900.sql.gz:/docker-entrypoint-initdb.d/002-musinsa-900.sql.gz:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  fashion_postgres_data:

@@ -1,0 +1,9 @@
+.env
+work/
+storage/
+cache/
+logs/
+**/__pycache__/
+*.py[cod]
+deploy/backend/.env
+deploy/backend/certs/
