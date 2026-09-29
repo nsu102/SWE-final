@@ -1,6 +1,10 @@
-# SWE Frontend
+# LookFind Frontend
 
-전신 사진을 업로드하거나 카메라(`getUserMedia`)로 찍으면 백엔드(`../backend`)의 `POST /api/search`로 상의 유사 상품을 검색하는 Next.js 앱입니다.
+사진을 업로드하거나 카메라(`getUserMedia`)로 찍으면 백엔드(`../backend`)의 `POST /api/search`로 상의 유사 상품을 검색하는 Next.js 앱입니다.
+
+- `app/components/look-find-app.tsx`: 홈·업로드(카메라)·RESULTS·ARCHIVE·SAVED·LOGIN 화면
+- `app/apis/search.ts`: 검색 API 호출, 상품 이미지 URL(`/media/...`)
+- `app/apis/local-store.ts`: 검색 기록·찜을 브라우저 localStorage에 저장 (로그인은 아직 UI만 있음)
 
 ```bash
 cp .env.example .env.local   # NEXT_PUBLIC_API_URL: 백엔드 주소

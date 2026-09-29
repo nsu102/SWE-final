@@ -1,11 +1,11 @@
-# Find the top — 상의 유사 상품 검색
+# LookFind — 이미지 기반 유사 의류 검색
 
 전신 사진을 올리거나 MacBook 카메라로 바로 찍으면 사람 파싱 모델로 상의 영역을 분리하고, Marqo FashionSigLIP 임베딩과 pgvector 유사도 검색으로 비슷한 무신사 상품을 찾아주는 서비스입니다.
 
 ```text
 crawler/   무신사·에이블리 상품 수집 → 상의 이미지 선별 → S3 업로드 (products.csv, selections.jsonl)
 backend/   카탈로그 임베딩 적재(index_catalog) + FastAPI 검색 API + PostgreSQL/pgvector
-frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 상의 크롭 미리보기, 유사 상품 결과
+frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 유사 상품 결과, 검색 기록(ARCHIVE), 찜(SAVED)
 ```
 
 ```text
