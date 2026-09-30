@@ -1,10 +1,10 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { readFavorites, readHistory, writeFavorites, writeHistory } from "../apis/local-store";
-import { photoStyle, productImage, productKey, searchImage, won } from "../apis/search";
-import { MAX_HISTORY, sourceLabels } from "../constants/look-find";
+import * as backend from "../apis/backend";
+import { AuthError, formatDate, photoStyle, productImage, productKey, readToken, won, writeToken } from "../apis/backend";
+import { sourceLabels } from "../constants/look-find";
 import type { Product, SearchHistory } from "../types/look-find";
 
 type Page = "home" | "history" | "favorites" | "results" | "login";
@@ -13,10 +13,11 @@ const LOADING_MESSAGE = "상의 영역을 찾고 비슷한 상품을 검색하�
 
 export default function LookFindApp() {
   const [page, setPage] = useState<Page>("home");
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [history, setHistory] = useState<SearchHistory[]>(readHistory);
-  const [clearedHistory, setClearedHistory] = useState<SearchHistory[] | null>(null);
-  const [favorites, setFavorites] = useState<Product[]>(readFavorites);
+  const [user, setUser] = useState<string | null>(null);
+  const loggedIn = user !== null;
+  const [history, setHistory] = useState<SearchHistory[]>([]);
+  const [canRestore, setCanRestore] = useState(false);
+  const [favorites, setFavorites] = useState<Product[]>([]);
   const [uploadMode, setUploadMode] = useState(false);
   const [isClosingUpload, setIsClosingUpload] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
@@ -62,6 +63,31 @@ export default function LookFindApp() {
     return () => { window.removeEventListener("wheel", onWheel); window.removeEventListener("touchstart", onTouchStart); window.removeEventListener("touchend", onTouchEnd); };
   }, [page, uploadMode]);
 
+  // Restore the server session on load, then load this account's archive and saved items.
+  useEffect(() => {
+    if (readToken()) backend.fetchMe().then((me) => setUser(me.email), (error) => { if (error instanceof AuthError) setUser(null); });
+  }, []);
+  useEffect(() => {
+    if (!user) return;
+    backend.fetchHistory().then(setHistory, fail);
+    backend.fetchFavorites().then(setFavorites, fail);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function signOutLocally() {
+    writeToken(null);
+    setUser(null);
+    setHistory([]);
+    setFavorites([]);
+    setCanRestore(false);
+  }
+
+  function fail(error: unknown) {
+    if (error instanceof AuthError) signOutLocally();
+    window.alert((error as Error).message);
+  }
+
+  const refreshHistory = () => backend.fetchHistory().then(setHistory, fail);
+
   // Attach the live camera to <video>; stopping tracks here also covers cancel/capture/close.
   useEffect(() => {
     if (!stream) return;
@@ -87,19 +113,17 @@ export default function LookFindApp() {
     setSearchStatus(LOADING_MESSAGE);
     setSearching(true);
     try {
-      const data = await searchImage(file);
+      const data = await backend.searchImage(file, label);
       setMatches(data.results);
       setSearchStatus([
         data.used_top_mask ? `상의 비율 ${(data.top_ratio * 100).toFixed(1)}%` : "상의를 찾지 못해 사진 전체로 검색했어요",
         `${(data.elapsed_ms / 1000).toFixed(1)}초`,
         `${data.results.length}개 결과`,
+        loggedIn ? "ARCHIVE에 저장됨" : "로그인하면 검색 기록이 저장돼요",
       ].join(" · "));
-      const entry: SearchHistory = {
-        id: Date.now().toString(36), label, count: data.results.length, thumb: data.box_preview, results: data.results,
-        searchedAt: new Date().toLocaleString("ko-KR", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }),
-      };
-      setHistory((current) => { const next = [entry, ...current].slice(0, MAX_HISTORY); writeHistory(next); return next; });
+      if (loggedIn) refreshHistory();
     } catch (error) {
+      if (error instanceof AuthError) signOutLocally();
       setSearchFailed(true);
       setSearchStatus((error as Error).message);
     } finally {
@@ -109,10 +133,14 @@ export default function LookFindApp() {
 
   function reopenSearch(item: SearchHistory) {
     setUploadedImage(item.thumb);
-    setMatches(item.results);
+    setMatches([]);
     setSearchFailed(false);
-    setSearchStatus(`${item.searchedAt} 검색 · ${item.count}개 결과`);
+    setSearchStatus("검색 기록을 불러오는 중…");
     setPage("results");
+    backend.fetchHistoryResults(item.id).then((results) => {
+      setMatches(results);
+      setSearchStatus(`${formatDate(item.searched_at)} 검색 · ${results.length}개 결과`);
+    }, (error) => { setSearchFailed(true); setSearchStatus((error as Error).message); if (error instanceof AuthError) signOutLocally(); });
   }
 
   async function openCamera() {
@@ -143,26 +171,31 @@ export default function LookFindApp() {
   function toggleFavorite(item: Product) {
     if (!loggedIn) return window.alert("찜 기능은 로그인 후 이용할 수 있어요.");
     const key = productKey(item);
-    setFavorites((current) => {
-      const next = current.some((saved) => productKey(saved) === key) ? current.filter((saved) => productKey(saved) !== key) : [...current, item];
-      writeFavorites(next);
-      return next;
-    });
+    const previous = favorites;
+    const saved = !previous.some((favorite) => productKey(favorite) === key);
+    setFavorites(saved ? [item, ...previous] : previous.filter((favorite) => productKey(favorite) !== key));
+    backend.saveFavorite(item, saved).catch((error) => { setFavorites(previous); fail(error); });
+  }
+
+  function removeHistory(id: number) {
+    setHistory((current) => current.filter((item) => item.id !== id));
+    backend.removeHistory(id).catch((error) => { fail(error); refreshHistory(); });
   }
 
   function clearHistory() {
-    setHistory((current) => {
-      setClearedHistory(current);
-      writeHistory([]);
-      return [];
-    });
+    setHistory([]);
+    setCanRestore(true);
+    backend.clearHistory().catch((error) => { fail(error); refreshHistory(); });
   }
 
   function restoreHistory() {
-    if (!clearedHistory) return;
-    setHistory(clearedHistory);
-    writeHistory(clearedHistory);
-    setClearedHistory(null);
+    backend.restoreHistory().then(() => { setCanRestore(false); refreshHistory(); }, fail);
+  }
+
+  async function signOut() {
+    await backend.logout().catch(() => {});
+    signOutLocally();
+    setPage("home");
   }
 
   function openUploadMode() {
@@ -187,7 +220,7 @@ export default function LookFindApp() {
         {([ ["home", "SEARCH"], ["history", "ARCHIVE"], ["favorites", "SAVED"], ["results", "RESULTS"] ] as const).map(([id, label]) =>
           <button className={page === id ? "active" : ""} key={id} onClick={() => setPage(id)}>{label}</button>)}
       </nav>
-      <button className="account" onClick={() => { if (loggedIn) setLoggedIn(false); else setPage("login"); }}>{loggedIn ? "MY PAGE / LOGOUT" : "LOGIN"}</button>
+      <button className="account" title={user ?? undefined} onClick={() => { if (loggedIn) signOut(); else setPage("login"); }}>{loggedIn ? "LOGOUT" : "LOGIN"}</button>
     </header>
 
     {page === "home" ? <section className="home">
@@ -200,7 +233,7 @@ export default function LookFindApp() {
         </div>
         <div className="hero-image"><Image src="/lookfind-hero.png" alt="LookFind 스타일 이미지" fill priority sizes="(max-width: 700px) 100vw, 50vw" /><div className={`analysis-layer stage-${analysisStage}`} aria-label="AI 의류 분석 표시"><div className="analysis-box shirt"><span>TOP</span><div className="analysis-crop crop-shirt"><small>TOP</small></div></div><div className="analysis-box pants"><span>PANTS</span><div className="analysis-crop crop-pants"><small>PANTS</small></div></div><div className="analysis-box boots"><span>BOOTS</span><div className="analysis-crop crop-boots"><small>BOOTS</small></div></div></div></div>
       </section>
-    </section> : page === "history" ? <History loggedIn={loggedIn} history={history} remove={(id) => setHistory((current) => { const next = current.filter((item) => item.id !== id); writeHistory(next); return next; })} clear={clearHistory} restore={restoreHistory} canRestore={Boolean(clearedHistory)} reopen={reopenSearch} /> : page === "favorites" ? <Favorites loggedIn={loggedIn} items={favorites} onFavorite={toggleFavorite} /> : page === "login" ? <Login onLogin={() => { setLoggedIn(true); setPage("home"); }} /> : <SearchTestPage image={uploadedImage} matches={matches} status={searchStatus} searching={searching} failed={searchFailed} filter={sourceFilter} setFilter={setSourceFilter} savedKeys={favorites.map(productKey)} onFavorite={toggleFavorite} />}
+    </section> : page === "history" ? <History loggedIn={loggedIn} history={history} remove={removeHistory} clear={clearHistory} restore={restoreHistory} canRestore={canRestore} reopen={reopenSearch} /> : page === "favorites" ? <Favorites loggedIn={loggedIn} items={favorites} onFavorite={toggleFavorite} /> : page === "login" ? <Login onLogin={(email) => { setUser(email); setPage("home"); }} /> : <SearchTestPage image={uploadedImage} matches={matches} status={searchStatus} searching={searching} failed={searchFailed} filter={sourceFilter} setFilter={setSourceFilter} savedKeys={favorites.map(productKey)} onFavorite={toggleFavorite} />}
     {uploadMode && <section className={isClosingUpload ? "upload-mode closing" : "upload-mode"} aria-modal="true" role="dialog"><button className="close-upload" onClick={closeUploadMode} aria-label="업로드 화면 닫기">×</button><div className="upload-content"><h2>UPLOAD PHOTO</h2><div className={isDragging ? "upload-finder dragging" : "upload-finder"} onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={dropImage}><span className="finder-corner top-left" /><span className="finder-corner top-right" /><span className="finder-corner bottom-left" /><span className="finder-corner bottom-right" />{stream ? <><video ref={videoRef} autoPlay playsInline muted aria-label="카메라 미리보기" /><span className="recording">● REC</span><div className="camera-actions"><button className="upload-mode-button" onClick={capture}>찰칵 <span>●</span></button><button className="upload-mode-button" onClick={() => setStream(undefined)}>취소</button></div></> : <><span className="recording">● REC</span><p>사진을 이곳에 끌어다 놓거나 파일을 업로드 해주세요.</p><div className="finder-buttons"><button className="upload-mode-button" onClick={() => fileInput.current?.click()}>SELECT FILE <span>↗</span></button><button className="upload-mode-button" onClick={openCamera}>CAMERA <span>●</span></button></div><small>JPG, PNG, WEBP · MAX 10MB</small></>}</div></div></section>}
   </main>;
 }
@@ -305,11 +338,11 @@ function SearchTestPage({ image, matches, status, searching, failed, filter, set
   </section>;
 }
 
-function History({ loggedIn, history, remove, clear, restore, canRestore, reopen }: { loggedIn: boolean; history: SearchHistory[]; remove: (id: string) => void; clear: () => void; restore: () => void; canRestore: boolean; reopen: (item: SearchHistory) => void }) {
+function History({ loggedIn, history, remove, clear, restore, canRestore, reopen }: { loggedIn: boolean; history: SearchHistory[]; remove: (id: number) => void; clear: () => void; restore: () => void; canRestore: boolean; reopen: (item: SearchHistory) => void }) {
   const [isClearing, setIsClearing] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
-  const cardRefs = useRef(new Map<string, HTMLElement>());
-  const previousCardPositions = useRef(new Map<string, DOMRect>());
+  const [removingId, setRemovingId] = useState<number | null>(null);
+  const cardRefs = useRef(new Map<number, HTMLElement>());
+  const previousCardPositions = useRef(new Map<number, DOMRect>());
 
   useLayoutEffect(() => {
     if (!previousCardPositions.current.size) return;
@@ -332,7 +365,7 @@ function History({ loggedIn, history, remove, clear, restore, canRestore, reopen
       setIsClearing(false);
     }, 700);
   };
-  const removeWithAnimation = (id: string) => {
+  const removeWithAnimation = (id: number) => {
     if (isClearing || removingId) return;
     setRemovingId(id);
     window.setTimeout(() => {
@@ -347,7 +380,7 @@ function History({ loggedIn, history, remove, clear, restore, canRestore, reopen
   return <section className="collection-page">
     <div className="collection-heading"><h1>ARCHIVE</h1><div className="collection-actions"><button className="collection-action" onClick={clearWithAnimation} disabled={!history.length || isClearing || Boolean(removingId)}>CLEAR ALL <span>↗</span></button><button className="collection-return" onClick={restore} disabled={!canRestore || isClearing || Boolean(removingId)}>RETURN <span>↶</span></button></div></div>
     {history.length ? <div className={isClearing ? "archive-grid is-clearing" : "archive-grid"}>{history.map((item, index) => <article className={`archive-card archive-tone-${index % 3} ${removingId === item.id ? "is-removing" : ""}`} key={item.id} style={isClearing ? { animationDelay: `${index * 42}ms` } : undefined} ref={(element) => { if (element) cardRefs.current.set(item.id, element); else cardRefs.current.delete(item.id); }}>
-      <button className="archive-open" onClick={() => reopen(item)}><div className="archive-visual saved-visual has-photo" style={photoStyle(item.thumb)} /><div className="archive-info"><h2>{item.label}</h2><p>{item.searchedAt}</p><strong>{item.count} MATCHES</strong></div></button>
+      <button className="archive-open" onClick={() => reopen(item)}><div className={item.thumb ? "archive-visual saved-visual has-photo" : "archive-visual saved-visual"} style={item.thumb ? photoStyle(item.thumb) : undefined} /><div className="archive-info"><h2>{item.label}</h2><p>{formatDate(item.searched_at)}</p><strong>{item.count} MATCHES</strong></div></button>
       <button className="archive-remove" aria-label={`${item.label} 삭제`} onClick={() => removeWithAnimation(item.id)} disabled={isClearing || Boolean(removingId)}>×</button>
     </article>)}</div> : <p className="collection-empty">아직 검색 기록이 없어요. 사진을 올려 첫 검색을 해보세요.</p>}
   </section>;
@@ -363,8 +396,27 @@ function Favorites({ loggedIn, items, onFavorite }: { loggedIn: boolean; items: 
   </section>;
 }
 
-function Login({ onLogin }: { onLogin: () => void }) {
-  return <section className="login-page"><div className="login-intro"><p>WELCOME TO</p><h1>LOOKFIND</h1><span>사진으로 찾고, 취향으로 저장하세요.</span></div><form className="login-panel" onSubmit={(event) => { event.preventDefault(); onLogin(); }}><p>MEMBER LOGIN</p><h2>WELCOME<br />BACK</h2><label>EMAIL<input type="email" name="email" placeholder="you@example.com" required /></label><label>PASSWORD<input type="password" name="password" placeholder="••••••••" required /></label><button type="submit">LOGIN <span>↗</span></button><small>아직 계정이 없으신가요? <b>SIGN UP</b></small></form></section>;
+function Login({ onLogin }: { onLogin: (email: string) => void }) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const signup = mode === "signup";
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setError("");
+    try {
+      const session = await backend.authenticate(mode, String(form.get("email")), String(form.get("password")));
+      writeToken(session.token);
+      onLogin(session.email);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <section className="login-page"><div className="login-intro"><p>WELCOME TO</p><h1>LOOKFIND</h1><span>사진으로 찾고, 취향으로 저장하세요.</span></div><form className="login-panel" onSubmit={submit}><p>{signup ? "CREATE ACCOUNT" : "MEMBER LOGIN"}</p><h2>{signup ? <>JOIN<br />LOOKFIND</> : <>WELCOME<br />BACK</>}</h2><label>EMAIL<input type="email" name="email" autoComplete="email" placeholder="you@example.com" required /></label><label>PASSWORD<input type="password" name="password" autoComplete={signup ? "new-password" : "current-password"} minLength={signup ? 8 : undefined} placeholder={signup ? "8자 이상" : "••••••••"} required /></label>{error && <small className="search-error" role="alert">{error}</small>}<button type="submit" disabled={busy}>{signup ? "SIGN UP" : "LOGIN"} <span>↗</span></button><small>{signup ? "이미 계정이 있으신가요? " : "아직 계정이 없으신가요? "}<button type="button" className="login-switch" onClick={() => { setMode(signup ? "login" : "signup"); setError(""); }}>{signup ? "LOGIN" : "SIGN UP"}</button></small></form></section>;
 }
 
 function MemberGate({ title, text }: { title: string; text: string }) { return <section className="member-gate"><b>✦</b><h1>{title}</h1><p>{text}</p></section>; }

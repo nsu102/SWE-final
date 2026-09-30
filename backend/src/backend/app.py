@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
+from psycopg.errors import ForeignKeyViolation, UniqueViolation
 from pydantic import BaseModel
 
+from src.backend.auth import bearer, create_session, hash_password, optional_user, require_user, token_hash, verify_password
 from src.backend.config import get_settings
 from src.backend.db import connect_db, count_products, initialize_database, search_products_multi
 from src.backend.ml import get_models
@@ -41,6 +44,42 @@ class SearchResponse(BaseModel):
     results: list[SearchResult]
 
 
+class Credentials(BaseModel):
+    email: str
+    password: str
+
+
+class Session(BaseModel):
+    token: str
+    email: str
+
+
+class Account(BaseModel):
+    email: str
+
+
+class HistoryItem(BaseModel):
+    id: int
+    label: str
+    searched_at: str
+    count: int
+    thumb: str | None
+
+
+PRODUCT_COLUMNS = (
+    "p.platform, p.goods_no, p.goods_name, p.brand_name, p.price, p.product_url, "
+    "p.image_path, p.s3_bucket, p.s3_key"
+)
+
+
+def to_result(row: dict) -> SearchResult:
+    return SearchResult(
+        platform=row["platform"], goods_no=row["goods_no"], goods_name=row["goods_name"],
+        brand_name=row["brand_name"], price=row["price"], product_url=row["product_url"],
+        image_url=image_url(row), similarity=float(row["similarity"]),
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
@@ -56,7 +95,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -92,6 +131,8 @@ async def search(
     image: UploadFile = File(...),
     limit: int = Query(20, ge=1, le=50),
     platform: str | None = Query(None, pattern="^(musinsa|ably)$"),
+    label: str = Form(""),
+    user_id: int | None = Depends(optional_user),
 ) -> SearchResponse:
     started = time.perf_counter()
     body = await image.read(settings.max_upload_bytes + 1)
@@ -111,25 +152,30 @@ async def search(
     query_id = uuid.uuid4()
     elapsed_ms = round((time.perf_counter() - started) * 1000)
 
-    with connect_db() as connection:
-        connection.execute(
-            "INSERT INTO search_events (query_id, platform_filter, result_count, elapsed_ms) VALUES (%s, %s, %s, %s)",
-            (query_id, platform, len(rows), elapsed_ms),
-        )
+    box_preview = preview_data_url(prepared.box_image)
 
-    results = [SearchResult(
-        platform=row["platform"], goods_no=row["goods_no"], goods_name=row["goods_name"],
-        brand_name=row["brand_name"], price=row["price"], product_url=row["product_url"],
-        image_url=image_url(row), similarity=float(row["similarity"]),
-    ) for row in rows]
+    with connect_db() as connection:
+        event = connection.execute(
+            "INSERT INTO search_events (query_id, platform_filter, result_count, elapsed_ms, user_id, label, thumb) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (query_id, platform, len(rows), elapsed_ms, user_id,
+             (label or image.filename or "업로드 사진")[:100], box_preview if user_id else None),
+        ).fetchone()
+        if user_id:
+            connection.cursor().executemany(
+                "INSERT INTO search_results (event_id, rank, platform, goods_no, similarity) VALUES (%s, %s, %s, %s, %s)",
+                [(event["id"], rank, row["platform"], row["goods_no"], float(row["similarity"]))
+                 for rank, row in enumerate(rows)],
+            )
+
     return SearchResponse(
         query_id=query_id, used_top_mask=prepared.used_top_mask,
         top_ratio=prepared.top_ratio,
-        box_preview=preview_data_url(prepared.box_image),
+        box_preview=box_preview,
         masked_preview=(
             preview_data_url(prepared.masked_image) if prepared.masked_image else None
         ),
-        elapsed_ms=elapsed_ms, results=results,
+        elapsed_ms=elapsed_ms, results=[to_result(row) for row in rows],
     )
 
 
@@ -153,3 +199,150 @@ def product_image(platform: str, goods_no: str):
     if not path.is_relative_to(allowed_root) or not path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
     return FileResponse(path)
+
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def valid_credentials(body: Credentials) -> tuple[str, str]:
+    email = body.email.strip().lower()
+    if not EMAIL_PATTERN.match(email) or len(email) > 254:
+        raise HTTPException(status_code=422, detail="이메일 형식이 올바르지 않아요.")
+    if not 8 <= len(body.password) <= 128:
+        raise HTTPException(status_code=422, detail="비밀번호는 8~128자여야 해요.")
+    return email, body.password
+
+
+@app.post("/api/auth/signup", response_model=Session, status_code=201)
+def signup(body: Credentials) -> Session:
+    email, password = valid_credentials(body)
+    try:
+        with connect_db() as connection:
+            user = connection.execute(
+                "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id",
+                (email, hash_password(password)),
+            ).fetchone()
+    except UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="이미 가입된 이메일이에요.") from exc
+    return Session(token=create_session(user["id"]), email=email)
+
+
+@app.post("/api/auth/login", response_model=Session)
+def login(body: Credentials) -> Session:
+    email = body.email.strip().lower()
+    with connect_db() as connection:
+        user = connection.execute(
+            "SELECT id, password_hash FROM users WHERE email = %s", (email,)
+        ).fetchone()
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 맞지 않아요.")
+    return Session(token=create_session(user["id"]), email=email)
+
+
+@app.post("/api/auth/logout", status_code=204)
+def logout(authorization: str | None = Header(None)) -> Response:
+    token = bearer(authorization)
+    if token:
+        with connect_db() as connection:
+            connection.execute("DELETE FROM sessions WHERE token_hash = %s", (token_hash(token),))
+    return Response(status_code=204)
+
+
+@app.get("/api/auth/me", response_model=Account)
+def me(user_id: int = Depends(require_user)) -> Account:
+    with connect_db() as connection:
+        row = connection.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
+    return Account(email=row["email"])
+
+
+@app.get("/api/history", response_model=list[HistoryItem])
+def history(user_id: int = Depends(require_user)) -> list[HistoryItem]:
+    with connect_db() as connection:
+        rows = connection.execute(
+            "SELECT id, label, created_at, result_count, thumb FROM search_events "
+            "WHERE user_id = %s AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 50",
+            (user_id,),
+        ).fetchall()
+    return [HistoryItem(
+        id=row["id"], label=row["label"] or "업로드 사진", count=row["result_count"], thumb=row["thumb"],
+        searched_at=row["created_at"].isoformat(),
+    ) for row in rows]
+
+
+@app.get("/api/history/{event_id}", response_model=list[SearchResult])
+def history_results(event_id: int, user_id: int = Depends(require_user)) -> list[SearchResult]:
+    with connect_db() as connection:
+        rows = connection.execute(
+            f"SELECT {PRODUCT_COLUMNS}, r.similarity FROM search_results r "
+            "JOIN search_events e ON e.id = r.event_id "
+            "JOIN products p ON p.platform = r.platform AND p.goods_no = r.goods_no "
+            "WHERE r.event_id = %s AND e.user_id = %s ORDER BY r.rank",
+            (event_id, user_id),
+        ).fetchall()
+    return [to_result(row) for row in rows]
+
+
+@app.delete("/api/history/{event_id}", status_code=204)
+def remove_history(event_id: int, user_id: int = Depends(require_user)) -> Response:
+    # Removing one entry detaches it from the account; the anonymous search log row stays.
+    with connect_db() as connection:
+        connection.execute("DELETE FROM search_results WHERE event_id = %s AND event_id IN "
+                           "(SELECT id FROM search_events WHERE user_id = %s)", (event_id, user_id))
+        connection.execute("UPDATE search_events SET user_id = NULL, thumb = NULL "
+                           "WHERE id = %s AND user_id = %s", (event_id, user_id))
+    return Response(status_code=204)
+
+
+@app.delete("/api/history", status_code=204)
+def clear_history(user_id: int = Depends(require_user)) -> Response:
+    with connect_db() as connection:
+        connection.execute("UPDATE search_events SET hidden_at = now() "
+                           "WHERE user_id = %s AND hidden_at IS NULL", (user_id,))
+    return Response(status_code=204)
+
+
+@app.post("/api/history/restore", status_code=204)
+def restore_history(user_id: int = Depends(require_user)) -> Response:
+    # Undo the most recent CLEAR ALL (all rows hidden in that statement share its now()).
+    with connect_db() as connection:
+        connection.execute(
+            "UPDATE search_events SET hidden_at = NULL WHERE user_id = %s AND hidden_at = "
+            "(SELECT max(hidden_at) FROM search_events WHERE user_id = %s)",
+            (user_id, user_id),
+        )
+    return Response(status_code=204)
+
+
+@app.get("/api/favorites", response_model=list[SearchResult])
+def favorites(user_id: int = Depends(require_user)) -> list[SearchResult]:
+    with connect_db() as connection:
+        rows = connection.execute(
+            f"SELECT {PRODUCT_COLUMNS}, 0 AS similarity FROM favorites f "
+            "JOIN products p ON p.platform = f.platform AND p.goods_no = f.goods_no "
+            "WHERE f.user_id = %s ORDER BY f.created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [to_result(row) for row in rows]
+
+
+@app.put("/api/favorites/{platform}/{goods_no}", status_code=204)
+def add_favorite(platform: str, goods_no: str, user_id: int = Depends(require_user)) -> Response:
+    try:
+        with connect_db() as connection:
+            connection.execute(
+                "INSERT INTO favorites (user_id, platform, goods_no) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (user_id, platform, goods_no),
+            )
+    except ForeignKeyViolation as exc:
+        raise HTTPException(status_code=404, detail="product not found") from exc
+    return Response(status_code=204)
+
+
+@app.delete("/api/favorites/{platform}/{goods_no}", status_code=204)
+def remove_favorite(platform: str, goods_no: str, user_id: int = Depends(require_user)) -> Response:
+    with connect_db() as connection:
+        connection.execute(
+            "DELETE FROM favorites WHERE user_id = %s AND platform = %s AND goods_no = %s",
+            (user_id, platform, goods_no),
+        )
+    return Response(status_code=204)

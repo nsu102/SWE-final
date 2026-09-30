@@ -51,3 +51,45 @@ CREATE TABLE IF NOT EXISTS search_events (
     elapsed_ms INTEGER NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Accounts. Passwords are scrypt hashes; sessions store only a SHA-256 of the bearer token.
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- A logged-in search is a search_events row with user_id set (ARCHIVE).
+-- hidden_at marks "CLEAR ALL" so the latest batch can be restored (RETURN).
+ALTER TABLE search_events ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE search_events ADD COLUMN IF NOT EXISTS label TEXT;
+ALTER TABLE search_events ADD COLUMN IF NOT EXISTS thumb TEXT;
+ALTER TABLE search_events ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS search_events_user_idx
+ON search_events (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS search_results (
+    event_id BIGINT NOT NULL REFERENCES search_events(id) ON DELETE CASCADE,
+    rank SMALLINT NOT NULL,
+    platform TEXT NOT NULL,
+    goods_no TEXT NOT NULL,
+    similarity REAL NOT NULL,
+    PRIMARY KEY (event_id, rank),
+    FOREIGN KEY (platform, goods_no) REFERENCES products (platform, goods_no) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS favorites (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform TEXT NOT NULL,
+    goods_no TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, platform, goods_no),
+    FOREIGN KEY (platform, goods_no) REFERENCES products (platform, goods_no) ON DELETE CASCADE
+);

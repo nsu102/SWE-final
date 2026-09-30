@@ -240,3 +240,5 @@
 .upload-finder video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 .camera-actions { position: absolute; bottom: 18px; display: flex; gap: 10px; }
 .finder-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.login-panel .login-switch { width: auto; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; color: var(--ink); font-size: inherit; font-weight: 800; text-decoration: underline; }
+.login-panel button:disabled { opacity: .55; cursor: wait; }

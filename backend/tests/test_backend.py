@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from src.backend.auth import bearer, hash_password, verify_password
 from src.backend.db import merge_search_results, vector_literal
 from src.backend.ml import FashionModels, prepare_query_views
 from src.jobs.index_catalog import plan_records
@@ -60,6 +61,17 @@ class BackendUtilityTest(unittest.TestCase):
         merged = merge_search_results([first, second], limit=2)
         self.assertEqual(["1", "2"], [row["goods_no"] for row in merged])
         self.assertEqual(0.8, merged[0]["similarity"])
+
+    def test_password_hash_roundtrip_and_salt(self):
+        stored = hash_password("correct horse")
+        self.assertTrue(verify_password("correct horse", stored))
+        self.assertFalse(verify_password("wrong horse", stored))
+        self.assertNotEqual(stored, hash_password("correct horse"))
+
+    def test_bearer_token_parsing(self):
+        self.assertEqual("abc", bearer("Bearer abc"))
+        self.assertIsNone(bearer("Basic abc"))
+        self.assertIsNone(bearer(None))
 
 
 if __name__ == "__main__":

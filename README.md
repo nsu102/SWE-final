@@ -4,7 +4,7 @@
 
 ```text
 crawler/   무신사·에이블리 상품 수집 → 상의 이미지 선별 → S3 업로드 (products.csv, selections.jsonl)
-backend/   카탈로그 임베딩 적재(index_catalog) + FastAPI 검색 API + PostgreSQL/pgvector
+backend/   카탈로그 임베딩 적재(index_catalog) + FastAPI 검색·회원·기록·찜 API + PostgreSQL/pgvector
 frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 유사 상품 결과, 검색 기록(ARCHIVE), 찜(SAVED)
 ```
 

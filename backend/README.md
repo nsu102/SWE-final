@@ -69,6 +69,22 @@ work/.venv/bin/uvicorn src.backend.app:app --host 127.0.0.1 --port 8000 --reload
 - 이미지 검색: `POST /api/search?limit=20&platform=musinsa`
 - 상품 이미지: `GET /media/{platform}/{goods_no}`
 
+### 회원·검색 기록·찜 API
+
+로그인하면 `{token}`을 받고, 이후 요청에 `Authorization: Bearer <token>`을 붙입니다. 비밀번호는 표준 라이브러리 scrypt 해시로, 세션은 토큰의 SHA-256만 `sessions` 테이블에 저장합니다(30일 만료). 로그인한 상태의 `POST /api/search`는 `search_events`(썸네일 포함)와 `search_results`에 저장되어 ARCHIVE가 됩니다.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST | `/api/auth/signup`, `/api/auth/login` | `{email, password}` → `{token, email}` |
+| POST | `/api/auth/logout` | 세션 삭제 |
+| GET | `/api/auth/me` | 현재 계정 |
+| GET | `/api/history` | 검색 기록 목록 |
+| GET | `/api/history/{id}` | 해당 검색의 결과 상품 |
+| DELETE | `/api/history/{id}`, `/api/history` | 한 건 삭제 / 전체 숨김 |
+| POST | `/api/history/restore` | 마지막 전체 삭제 되돌리기 |
+| GET | `/api/favorites` | 찜 목록 |
+| PUT, DELETE | `/api/favorites/{platform}/{goods_no}` | 찜 추가 / 해제 |
+
 ## 크롤링 결과 적재
 
 크롤러 저장소가 만든 `products.csv`와 `selected/selections.jsonl`을 명시적으로 전달합니다. `selections.jsonl`에 `s3_bucket`과 `s3_key`가 있으면 S3에서 직접 이미지를 읽고, 로컬 파일만 있으면 `storage/`에 복사합니다.
@@ -126,5 +142,7 @@ Nginx는 외부 요청을 API 컨테이너로 전달하고, API 컨테이너는 
 | `LOCAL_STORAGE_ROOT` | 로컬 상품 이미지 루트 |
 | `CORS_ORIGINS` | 허용할 프런트엔드 origin 목록 |
 | `MAX_UPLOAD_MB` | 검색 사진 최대 크기 |
+
+`AUTO_MIGRATE=false`인 운영 DB에는 배포 후 `python -m src.backend.migrate`로 새 테이블(`users`, `sessions`, `search_results`, `favorites`)을 만듭니다.
 
 실제 `.env`, 인증서, 모델 캐시, 로컬 저장 이미지는 Git에 포함되지 않습니다.
