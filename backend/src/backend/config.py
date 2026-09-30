@@ -18,6 +18,12 @@ class Settings:
     s3_bucket: str
     aws_region: str
     s3_endpoint_url: str | None
+    frontend_url: str
+    smtp_host: str | None
+    smtp_port: int
+    smtp_user: str | None
+    smtp_password: str | None
+    mail_from: str
 
 
 @lru_cache
@@ -40,4 +46,10 @@ def get_settings() -> Settings:
         s3_bucket=os.getenv("AWS_BUCKET_NAME", "software2026"),
         aws_region=os.getenv("AWS_REGION", "ap-northeast-2"),
         s3_endpoint_url=os.getenv("S3_ENDPOINT_URL") or None,
+        frontend_url=os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/"),
+        smtp_host=os.getenv("SMTP_HOST") or None,
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_user=os.getenv("SMTP_USER") or None,
+        smtp_password=os.getenv("SMTP_PASSWORD") or None,
+        mail_from=os.getenv("MAIL_FROM", "LookFind <no-reply@lookfind.local>"),
     )

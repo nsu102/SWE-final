@@ -46,6 +46,10 @@ export function searchImage(file: File, label: string) {
 
 export const authenticate = (mode: "login" | "signup", email: string, password: string) =>
   request<{ token: string; email: string }>(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify({ email, password }) });
+export const requestPasswordReset = (email: string) =>
+  request<void>("/api/auth/reset-request", { method: "POST", body: JSON.stringify({ email }) });
+export const resetPassword = (token: string, password: string) =>
+  request<{ token: string; email: string }>("/api/auth/reset", { method: "POST", body: JSON.stringify({ token, password }) });
 export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
 export const fetchMe = () => request<{ email: string }>("/api/auth/me");
 

@@ -18,6 +18,7 @@ export default function LookFindApp() {
   const [history, setHistory] = useState<SearchHistory[]>([]);
   const [canRestore, setCanRestore] = useState(false);
   const [favorites, setFavorites] = useState<Product[]>([]);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [uploadMode, setUploadMode] = useState(false);
   const [isClosingUpload, setIsClosingUpload] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
@@ -65,6 +66,13 @@ export default function LookFindApp() {
 
   // Restore the server session on load, then load this account's archive and saved items.
   useEffect(() => {
+    // Password reset links look like /?reset=<token>; open the login panel in reset mode.
+    const token = new URLSearchParams(window.location.search).get("reset");
+    if (token) {
+      setResetToken(token); // eslint-disable-line react-hooks/set-state-in-effect
+      setPage("login");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
     if (readToken()) backend.fetchMe().then((me) => setUser(me.email), (error) => { if (error instanceof AuthError) setUser(null); });
   }, []);
   useEffect(() => {
@@ -233,7 +241,7 @@ export default function LookFindApp() {
         </div>
         <div className="hero-image"><Image src="/lookfind-hero.png" alt="LookFind 스타일 이미지" fill priority sizes="(max-width: 700px) 100vw, 50vw" /><div className={`analysis-layer stage-${analysisStage}`} aria-label="AI 의류 분석 표시"><div className="analysis-box shirt"><span>TOP</span><div className="analysis-crop crop-shirt"><small>TOP</small></div></div><div className="analysis-box pants"><span>PANTS</span><div className="analysis-crop crop-pants"><small>PANTS</small></div></div><div className="analysis-box boots"><span>BOOTS</span><div className="analysis-crop crop-boots"><small>BOOTS</small></div></div></div></div>
       </section>
-    </section> : page === "history" ? <History loggedIn={loggedIn} history={history} remove={removeHistory} clear={clearHistory} restore={restoreHistory} canRestore={canRestore} reopen={reopenSearch} /> : page === "favorites" ? <Favorites loggedIn={loggedIn} items={favorites} onFavorite={toggleFavorite} /> : page === "login" ? <Login onLogin={(email) => { setUser(email); setPage("home"); }} /> : <SearchTestPage image={uploadedImage} matches={matches} status={searchStatus} searching={searching} failed={searchFailed} filter={sourceFilter} setFilter={setSourceFilter} savedKeys={favorites.map(productKey)} onFavorite={toggleFavorite} />}
+    </section> : page === "history" ? <History loggedIn={loggedIn} history={history} remove={removeHistory} clear={clearHistory} restore={restoreHistory} canRestore={canRestore} reopen={reopenSearch} /> : page === "favorites" ? <Favorites loggedIn={loggedIn} items={favorites} onFavorite={toggleFavorite} /> : page === "login" ? <Login key={resetToken ?? "login"} resetToken={resetToken} onLogin={(email) => { setUser(email); setResetToken(null); setPage("home"); }} /> : <SearchTestPage image={uploadedImage} matches={matches} status={searchStatus} searching={searching} failed={searchFailed} filter={sourceFilter} setFilter={setSourceFilter} savedKeys={favorites.map(productKey)} onFavorite={toggleFavorite} />}
     {uploadMode && <section className={isClosingUpload ? "upload-mode closing" : "upload-mode"} aria-modal="true" role="dialog"><button className="close-upload" onClick={closeUploadMode} aria-label="업로드 화면 닫기">×</button><div className="upload-content"><h2>UPLOAD PHOTO</h2><div className={isDragging ? "upload-finder dragging" : "upload-finder"} onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={dropImage}><span className="finder-corner top-left" /><span className="finder-corner top-right" /><span className="finder-corner bottom-left" /><span className="finder-corner bottom-right" />{stream ? <><video ref={videoRef} autoPlay playsInline muted aria-label="카메라 미리보기" /><span className="recording">● REC</span><div className="camera-actions"><button className="upload-mode-button" onClick={capture}>찰칵 <span>●</span></button><button className="upload-mode-button" onClick={() => setStream(undefined)}>취소</button></div></> : <><span className="recording">● REC</span><p>사진을 이곳에 끌어다 놓거나 파일을 업로드 해주세요.</p><div className="finder-buttons"><button className="upload-mode-button" onClick={() => fileInput.current?.click()}>SELECT FILE <span>↗</span></button><button className="upload-mode-button" onClick={openCamera}>CAMERA <span>●</span></button></div><small>JPG, PNG, WEBP · MAX 10MB</small></>}</div></div></section>}
   </main>;
 }
@@ -396,18 +404,36 @@ function Favorites({ loggedIn, items, onFavorite }: { loggedIn: boolean; items: 
   </section>;
 }
 
-function Login({ onLogin }: { onLogin: (email: string) => void }) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+type LoginMode = "login" | "signup" | "forgot" | "reset";
+const loginCopy: Record<LoginMode, { eyebrow: string; title: [string, string]; submit: string }> = {
+  login: { eyebrow: "MEMBER LOGIN", title: ["WELCOME", "BACK"], submit: "LOGIN" },
+  signup: { eyebrow: "CREATE ACCOUNT", title: ["JOIN", "LOOKFIND"], submit: "SIGN UP" },
+  forgot: { eyebrow: "FORGOT PASSWORD", title: ["RESET", "PASSWORD"], submit: "SEND LINK" },
+  reset: { eyebrow: "NEW PASSWORD", title: ["SET NEW", "PASSWORD"], submit: "SAVE & LOGIN" },
+};
+
+function Login({ onLogin, resetToken }: { onLogin: (email: string) => void; resetToken: string | null }) {
+  const [mode, setMode] = useState<LoginMode>(resetToken ? "reset" : "login");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const signup = mode === "signup";
+  const copy = loginCopy[mode];
+  const switchTo = (next: LoginMode) => { setMode(next); setError(""); setNotice(""); };
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") ?? "");
+    const password = String(form.get("password") ?? "");
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      const session = await backend.authenticate(mode, String(form.get("email")), String(form.get("password")));
+      if (mode === "forgot") {
+        await backend.requestPasswordReset(email);
+        setNotice("가입된 이메일이면 재설정 링크를 보냈어요. 30분 안에 링크를 열어 주세요.");
+        return;
+      }
+      const session = mode === "reset" ? await backend.resetPassword(resetToken ?? "", password) : await backend.authenticate(mode, email, password);
       writeToken(session.token);
       onLogin(session.email);
     } catch (e) {
@@ -416,7 +442,15 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
       setBusy(false);
     }
   }
-  return <section className="login-page"><div className="login-intro"><p>WELCOME TO</p><h1>LOOKFIND</h1><span>사진으로 찾고, 취향으로 저장하세요.</span></div><form className="login-panel" onSubmit={submit}><p>{signup ? "CREATE ACCOUNT" : "MEMBER LOGIN"}</p><h2>{signup ? <>JOIN<br />LOOKFIND</> : <>WELCOME<br />BACK</>}</h2><label>EMAIL<input type="email" name="email" autoComplete="email" placeholder="you@example.com" required /></label><label>PASSWORD<input type="password" name="password" autoComplete={signup ? "new-password" : "current-password"} minLength={signup ? 8 : undefined} placeholder={signup ? "8자 이상" : "••••••••"} required /></label>{error && <small className="search-error" role="alert">{error}</small>}<button type="submit" disabled={busy}>{signup ? "SIGN UP" : "LOGIN"} <span>↗</span></button><small>{signup ? "이미 계정이 있으신가요? " : "아직 계정이 없으신가요? "}<button type="button" className="login-switch" onClick={() => { setMode(signup ? "login" : "signup"); setError(""); }}>{signup ? "LOGIN" : "SIGN UP"}</button></small></form></section>;
+  return <section className="login-page"><div className="login-intro"><p>WELCOME TO</p><h1>LOOKFIND</h1><span>사진으로 찾고, 취향으로 저장하세요.</span></div><form className="login-panel" onSubmit={submit}><p>{copy.eyebrow}</p><h2>{copy.title[0]}<br />{copy.title[1]}</h2>
+    {mode !== "reset" && <label>EMAIL<input type="email" name="email" autoComplete="email" placeholder="you@example.com" required /></label>}
+    {mode !== "forgot" && <label>{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<input type="password" name="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "login" ? undefined : 8} placeholder={mode === "login" ? "••••••••" : "8자 이상"} required /></label>}
+    {error && <small className="search-error" role="alert">{error}</small>}
+    {notice && <small role="status">{notice}</small>}
+    <button type="submit" disabled={busy}>{copy.submit} <span>↗</span></button>
+    {mode === "login" && <small><button type="button" className="login-switch" onClick={() => switchTo("forgot")}>비밀번호를 잊으셨나요?</button></small>}
+    <small>{mode === "signup" ? "이미 계정이 있으신가요? " : mode === "login" ? "아직 계정이 없으신가요? " : ""}<button type="button" className="login-switch" onClick={() => switchTo(mode === "login" ? "signup" : "login")}>{mode === "login" ? "SIGN UP" : "LOGIN"}</button></small>
+  </form></section>;
 }
 
 function MemberGate({ title, text }: { title: string; text: string }) { return <section className="member-gate"><b>✦</b><h1>{title}</h1><p>{text}</p></section>; }

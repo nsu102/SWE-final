@@ -9,4 +9,4 @@ COPY src/common src/common
 COPY src/jobs src/jobs
 RUN useradd --uid 10001 --create-home api && mkdir -p /app/cache /app/storage && chown -R api:api /app/cache /app/storage
 USER api
-CMD ["uvicorn", "src.backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "8"]
+CMD ["uvicorn", "src.backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--forwarded-allow-ips", "*", "--limit-concurrency", "8"]

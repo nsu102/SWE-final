@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from src.backend.auth import bearer, hash_password, verify_password
+from src.backend.auth import FailureLimiter, bearer, hash_password, verify_password
 from src.backend.db import merge_search_results, vector_literal
 from src.backend.ml import FashionModels, prepare_query_views
 from src.jobs.index_catalog import plan_records
@@ -72,6 +72,16 @@ class BackendUtilityTest(unittest.TestCase):
         self.assertEqual("abc", bearer("Bearer abc"))
         self.assertIsNone(bearer("Basic abc"))
         self.assertIsNone(bearer(None))
+
+    def test_failure_limiter_blocks_after_limit_and_resets(self):
+        limiter = FailureLimiter(limit=2, window=60)
+        limiter.hit("a")
+        self.assertEqual(0, limiter.retry_after("a"))
+        limiter.hit("a")
+        self.assertGreater(limiter.retry_after("a"), 0)
+        self.assertEqual(0, limiter.retry_after("b"))
+        limiter.reset("a")
+        self.assertEqual(0, limiter.retry_after("a"))
 
 
 if __name__ == "__main__":
