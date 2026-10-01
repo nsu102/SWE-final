@@ -49,7 +49,7 @@ work/.venv/bin/python -m src.musinsa.select_images --limit 5
 # 특정 상품 재처리
 work/.venv/bin/python -m src.musinsa.select_images --goods-no 7091145 --overwrite
 
-# 기존 no_match만 상품 상세 이미지(기본 최대 20장)까지 재검사하고 S3 업로드
+# 기존 no_match/excluded만 썸네일·상단 갤러리 범위에서 재검사하고 S3 업로드
 work/.venv/bin/python -m src.musinsa.select_images --retry-no-match --overwrite
 ```
 

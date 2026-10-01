@@ -86,7 +86,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-threshold", type=float, default=0.05)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--retry-no-match", action="store_true")
-    parser.add_argument("--max-detail-images", type=int, default=20)
+    # Only the thumbnail and top gallery are candidates; the 상품정보 (goodsContents) images are
+    # styling/detail shots, not catalog photos. Raise this only to experiment.
+    parser.add_argument("--max-detail-images", type=int, default=0)
     parser.add_argument(
         "--max-checks", type=int, default=40,
         help="stop after this many parsed views per product (tall detail sheets split into many)",
@@ -119,17 +121,26 @@ class _ImageSourceParser(HTMLParser):
             self.urls.append(url)
 
 
+class ProductUnavailable(Exception):
+    """Musinsa no longer serves this product; record it as excluded instead of retrying."""
+
+
 def parse_gallery_urls(
     body: bytes,
     thumbnail_url: str | None = None,
-    max_detail_images: int = 20,
+    max_detail_images: int = 0,
 ) -> list[str]:
     match = NEXT_DATA_RE.search(body)
     if not match:
         raise ValueError("__NEXT_DATA__ missing from product page")
     document = json.loads(match.group(1))
     page_props = document["props"]["pageProps"]
-    product = page_props.get("meta", {}).get("data", {})
+    meta = page_props.get("meta") or {}
+    status = meta.get("meta") or {}
+    if meta.get("data") is None and status.get("result") == "FAIL":
+        # e.g. DISPLAY_000_0006 "유효하지 않은 상품 입니다." (deleted / no longer sold)
+        raise ProductUnavailable(f"{status.get('errorCode')}: {status.get('message')}")
+    product = meta.get("data") or {}
     gallery = product.get("goodsImages")
     if gallery is None:
         for query in page_props.get("dehydratedState", {}).get("queries", []):
@@ -337,7 +348,31 @@ def process_product(
     goods_no = row["goods_no"]
     product_url = row.get("product_url") or f"https://www.musinsa.com/products/{goods_no}"
     page_body = fetcher.get(product_url)
-    urls = parse_gallery_urls(page_body, row.get("thumbnail_url"), args.max_detail_images)
+
+    def excluded(reason: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "platform": "musinsa",
+            "goods_no": goods_no,
+            "product_url": product_url,
+            "status": "excluded",
+            "exclude_reason": reason,
+            "selected_index": None,
+            "selected_url": None,
+            "local_path": None,
+            "s3_bucket": args.s3_bucket,
+            "s3_key": None,
+            "human_ratio": None,
+            "top_ratio": None,
+            "mask_path": None,
+            "checked_images": candidates,
+            "processed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "model": args.model,
+        }
+
+    try:
+        urls = parse_gallery_urls(page_body, row.get("thumbnail_url"), args.max_detail_images)
+    except ProductUnavailable as exc:
+        return {**excluded("product_unavailable", []), "message": str(exc)}
     if not urls:
         raise ValueError("product gallery is empty")
 
@@ -398,24 +433,7 @@ def process_product(
             break
     pool.shutdown(wait=False, cancel_futures=True)
     if selected is None:
-        return {
-            "platform": "musinsa",
-            "goods_no": goods_no,
-            "product_url": product_url,
-            "status": "excluded",
-            "exclude_reason": "no_person_free_top_image",
-            "selected_index": None,
-            "selected_url": None,
-            "local_path": None,
-            "s3_bucket": args.s3_bucket,
-            "s3_key": None,
-            "human_ratio": None,
-            "top_ratio": None,
-            "mask_path": None,
-            "checked_images": candidates,
-            "processed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "model": args.model,
-        }
+        return excluded("no_person_free_top_image", candidates)
 
     index, url, image, human_ratio, top_ratio, top_mask, crop_box = selected
     if small_variant(url) != url and image.width < 500:
@@ -536,7 +554,8 @@ def main() -> int:
                     f"{goods_no}: " + (
                         f"selected image {result['selected_index']} "
                         f"(human={result['human_ratio']:.2%}, top={result['top_ratio']:.2%})"
-                        if result["status"] == "selected" else "no person-free gallery image"
+                        if result["status"] == "selected"
+                        else result.get("message") or "no person-free gallery image"
                     ), flush=True,
                 )
         except Exception as exc:

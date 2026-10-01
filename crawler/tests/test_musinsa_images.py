@@ -7,7 +7,7 @@ from PIL import Image
 
 import numpy as np
 
-from src.musinsa.select_images import load_completed, small_variant, analysis_views, mask_border_ratio, parse_gallery_urls, save_result
+from src.musinsa.select_images import ProductUnavailable, load_completed, small_variant, analysis_views, mask_border_ratio, parse_gallery_urls, save_result
 
 
 class DetailParserTest(unittest.TestCase):
@@ -23,12 +23,30 @@ class DetailParserTest(unittest.TestCase):
             + json.dumps(document).encode()
             + b"</script>"
         )
-        self.assertEqual([
+        gallery = [
             "https://image.msscdn.net/images/main.jpg",
             "https://image.msscdn.net/images/detail-1.jpg",
             "https://image.msscdn.net/images/detail-2.jpg",
-            "https://image.msscdn.net/images/detail-3.jpg",
-        ], parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg"))
+        ]
+        # Default: thumbnail + top gallery only; the 상품정보 (goodsContents) images are skipped.
+        self.assertEqual(gallery, parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg"))
+        self.assertEqual(
+            gallery + ["https://image.msscdn.net/images/detail-3.jpg"],
+            parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg", max_detail_images=5),
+        )
+
+    def test_unavailable_product_is_reported_not_crashing(self):
+        document = {"props": {"pageProps": {"meta": {
+            "meta": {"result": "FAIL", "errorCode": "DISPLAY_000_0006", "message": "invalid"},
+            "data": None, "error": None,
+        }}}}
+        html = (
+            b'<script id="__NEXT_DATA__" type="application/json">'
+            + json.dumps(document).encode()
+            + b"</script>"
+        )
+        with self.assertRaises(ProductUnavailable):
+            parse_gallery_urls(html, None)
 
     def test_deduplicates_urls(self):
         document = {"props": {"pageProps": {"meta": {"data": {"goodsImages": [

@@ -29,7 +29,7 @@ print(len(done))' "$data/selected/selections.jsonl" 2>/dev/null || echo 0
 for pass in 1 2 3; do
   echo "pass $pass: selecting person-free images with $workers workers (log: crawler/logs/select.log)"
   "$py" -m src.musinsa.select_images --workers "$workers" --output "$data/selected" \
-    --delay 0.3 --max-detail-images 50 --delete-local-after-upload 2>&1 | tee -a logs/select.log || true
+    --delay 0.3 --delete-local-after-upload 2>&1 | tee -a logs/select.log || true
   processed=$(processed_count)
   echo "processed $processed/$total products"
   (( processed * 1000 >= total * 995 )) && break
