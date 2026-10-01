@@ -37,14 +37,17 @@ finish() {
   zone="$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/zone | awk -F/ '{print $NF}')"
   gcloud compute instances delete "$name" --zone "$zone" --quiet
 }
-trap finish EXIT
-
 echo "== setup $(date)"
-sudo apt-get install -y -q python3-venv >/dev/null
+# A fresh VM may still be running apt at boot; wait for its lock instead of failing.
+sudo apt-get -o DPkg::Lock::Timeout=600 update -q >/dev/null
+sudo apt-get -o DPkg::Lock::Timeout=600 install -y -q python3-venv python3-pip >/dev/null
 python3 -m venv backend/work/.venv
 pip install -q torch torchvision
 pip install -q -r crawler/requirements-ml.txt -r crawler/requirements-aws.txt
 python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+# Only from here on does the VM upload results and delete itself on exit. If setup fails, the VM
+# stays up for inspection (gcloud's 12h max-run-duration still deletes it).
+trap finish EXIT
 
 echo "== select $(date)"
 SELECT_ONLY=1 WORKERS="${WORKERS:-10}" bash scripts/rebuild_catalog.sh
