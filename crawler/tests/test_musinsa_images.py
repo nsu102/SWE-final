@@ -7,11 +7,11 @@ from PIL import Image
 
 import numpy as np
 
-from src.musinsa.select_images import mask_border_ratio, parse_gallery_urls, save_result
+from src.musinsa.select_images import load_completed, small_variant, analysis_views, mask_border_ratio, parse_gallery_urls, save_result
 
 
-class GalleryParserTest(unittest.TestCase):
-    def test_extracts_thumbnail_and_gallery_but_ignores_goods_contents(self):
+class DetailParserTest(unittest.TestCase):
+    def test_extracts_thumbnail_and_detail_images_in_order(self):
         document = {
             "props": {"pageProps": {"meta": {"data": {"goodsImages": [
                 {"imageUrl": "/images/detail-1.jpg"},
@@ -27,6 +27,7 @@ class GalleryParserTest(unittest.TestCase):
             "https://image.msscdn.net/images/main.jpg",
             "https://image.msscdn.net/images/detail-1.jpg",
             "https://image.msscdn.net/images/detail-2.jpg",
+            "https://image.msscdn.net/images/detail-3.jpg",
         ], parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg"))
 
     def test_deduplicates_urls(self):
@@ -53,12 +54,39 @@ class GalleryParserTest(unittest.TestCase):
             self.assertEqual(2, len(rows))
             self.assertEqual(7, next(row for row in rows if row["goods_no"] == "1")["selected_index"])
 
+    def test_splits_very_tall_detail_image(self):
+        image = Image.new("RGB", (100, 1000))
+        views = analysis_views(image)
+        self.assertGreater(len(views), 1)
+        self.assertEqual((100, 150), views[0][0].size)
+        self.assertEqual((0, 850, 100, 1000), views[-1][1])
+
     def test_penalizes_garment_mask_touching_crop_edges(self):
         centered = np.zeros((100, 100), dtype=bool)
         centered[20:80, 20:80] = True
         clipped = np.zeros((100, 100), dtype=bool)
         clipped[:, 20:80] = True
         self.assertLess(mask_border_ratio(centered), mask_border_ratio(clipped))
+
+    def test_load_completed_retries_exclusions_caused_by_download_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selections.jsonl"
+            path.write_text("\n".join(json.dumps(row) for row in [
+                {"goods_no": "1", "status": "selected", "checked_images": [{"error": "timeout"}]},
+                {"goods_no": "2", "status": "excluded", "checked_images": [{"top_ratio": 0.0}]},
+                {"goods_no": "3", "status": "excluded", "checked_images": [{"error": "reset"}]},
+                {"goods_no": "4", "status": "excluded", "checked_images": [{"error": "reset"}]},
+                {"goods_no": "4", "status": "selected", "checked_images": []},
+            ]) + "\n")
+            self.assertEqual({"1", "2", "4"}, load_completed(path))
+
+    def test_small_variant_only_rewrites_musinsa_500_images(self):
+        self.assertEqual(
+            "https://image.msscdn.net/images/goods_img/1/1_123_320.jpg",
+            small_variant("https://image.msscdn.net/images/goods_img/1/1_123_500.jpg"),
+        )
+        external = "https://example.com/detail/8d404de4.jpg"
+        self.assertEqual(external, small_variant(external))
 
 
 if __name__ == "__main__":

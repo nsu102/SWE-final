@@ -14,18 +14,43 @@ from src.backend.config import get_settings
 from src.common.human_parser import label_ids_for_tops, select_device
 
 
+def rgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """sRGB uint8 pixels (N, 3) -> CIE Lab (D65)."""
+    c = rgb.astype(np.float32) / 255
+    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    xyz = c @ np.array(
+        [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]],
+        dtype=np.float32,
+    ).T / np.array([0.95047, 1.0, 1.08883], dtype=np.float32)
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack(
+        [116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], axis=1
+    )
+
+
+def garment_color(image: Image.Image, mask: np.ndarray) -> tuple[float, float, float]:
+    """Median Lab colour of the garment pixels (median ignores small prints/shadows)."""
+    pixels = np.asarray(image.convert("RGB"))[mask]
+    if len(pixels) > 20_000:
+        pixels = pixels[:: len(pixels) // 20_000]
+    lab = np.median(rgb_to_lab(pixels), axis=0)
+    return float(lab[0]), float(lab[1]), float(lab[2])
+
+
 @dataclass(frozen=True)
 class PreparedImage:
     box_image: Image.Image
     masked_image: Image.Image | None
     used_top_mask: bool
     top_ratio: float
+    color_lab: tuple[float, float, float] | None = None
+    # Garment box as fractions of width/height (x0, y0, x1, y1), for display crops.
+    crop_box: tuple[float, float, float, float] | None = None
 
     @property
-    def images(self) -> tuple[Image.Image, ...]:
-        if self.masked_image is None:
-            return (self.box_image,)
-        return (self.box_image, self.masked_image)
+    def search_image(self) -> Image.Image:
+        """Garment only (person/background painted grey) when a top was found."""
+        return self.masked_image if self.masked_image is not None else self.box_image
 
 
 def prepare_query_views(
@@ -54,6 +79,11 @@ def prepare_query_views(
         masked_image=neutral.crop(box),
         used_top_mask=True,
         top_ratio=ratio,
+        color_lab=garment_color(image, mask),
+        crop_box=(
+            box[0] / image.width, box[1] / image.height,
+            box[2] / image.width, box[3] / image.height,
+        ),
     )
 
 
@@ -94,7 +124,8 @@ class FashionModels:
         with self._lock, torch.inference_mode():
             inputs = self.parser_processor(images=image, return_tensors="pt")
             inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            logits = self.parser_model(**inputs).logits
+            # Upsample on CPU: per-image output sizes would make MPS build a new graph every call.
+            logits = self.parser_model(**inputs).logits.float().cpu()
             logits = F.interpolate(
                 logits, size=(image.height, image.width), mode="bilinear", align_corners=False
             )

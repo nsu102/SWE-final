@@ -100,3 +100,8 @@ CREATE TABLE IF NOT EXISTS password_resets (
     expires_at TIMESTAMPTZ NOT NULL,
     used_at TIMESTAMPTZ
 );
+
+-- Garment colour (median CIE Lab of the parsed top) for colour-aware reranking, and the
+-- garment box (fractions of width/height) used to crop product photos for display.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS color_lab REAL[];
+ALTER TABLE products ADD COLUMN IF NOT EXISTS crop_box REAL[];

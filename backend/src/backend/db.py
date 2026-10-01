@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ def search_products(
     params.extend([vector, limit])
     query = f"""
         SELECT platform, goods_no, goods_name, brand_name, price,
-               product_url, image_path, s3_bucket, s3_key,
+               product_url, image_path, s3_bucket, s3_key, color_lab,
                1 - (embedding <=> %s::vector) AS similarity
         FROM products
         {where}
@@ -45,29 +46,34 @@ def search_products(
         return list(connection.execute(query, params).fetchall())
 
 
-def merge_search_results(
-    result_sets: list[list[dict[str, Any]]], limit: int
-) -> list[dict[str, Any]]:
-    merged: dict[tuple[str, str], dict[str, Any]] = {}
-    for rows in result_sets:
-        for row in rows:
-            key = (str(row["platform"]), str(row["goods_no"]))
-            if key not in merged or float(row["similarity"]) > float(merged[key]["similarity"]):
-                merged[key] = row
-    return sorted(
-        merged.values(), key=lambda row: float(row["similarity"]), reverse=True
-    )[:limit]
+# Lightness differs with lighting/exposure far more than hue does, so it counts half.
+MAX_COLOR_DISTANCE = 60.0
 
 
-def search_products_multi(
-    embeddings: list[list[float]], limit: int, platform: str | None = None
+def color_distance(a: list[float], b: list[float]) -> float:
+    return math.sqrt((0.5 * (a[0] - b[0])) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+def rerank_by_color(
+    rows: list[dict[str, Any]], query_lab: tuple[float, float, float] | None, weight: float
 ) -> list[dict[str, Any]]:
-    candidate_limit = min(200, max(50, limit * 4))
-    result_sets = [
-        search_products(embedding, candidate_limit, platform)
-        for embedding in embeddings
-    ]
-    return merge_search_results(result_sets, limit)
+    """similarity -= weight * (garment colour distance, capped and scaled to 0..1)."""
+    if query_lab is None or weight <= 0:
+        return rows
+    for row in rows:
+        if row.get("color_lab"):
+            distance = min(color_distance(query_lab, row["color_lab"]), MAX_COLOR_DISTANCE)
+            row["similarity"] = float(row["similarity"]) - weight * distance / MAX_COLOR_DISTANCE
+    return sorted(rows, key=lambda row: float(row["similarity"]), reverse=True)
+
+
+def search_similar(
+    embedding: list[float], limit: int, platform: str | None,
+    query_lab: tuple[float, float, float] | None, color_weight: float,
+) -> list[dict[str, Any]]:
+    # Colour can only reorder what the vector search found, so over-fetch candidates.
+    candidates = search_products(embedding, min(200, max(60, limit * 5)), platform)
+    return rerank_by_color(candidates, query_lab, color_weight)[:limit]
 
 
 def count_products() -> int:

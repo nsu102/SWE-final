@@ -24,6 +24,7 @@ class Settings:
     smtp_user: str | None
     smtp_password: str | None
     mail_from: str
+    color_weight: float
 
 
 @lru_cache
@@ -52,4 +53,6 @@ def get_settings() -> Settings:
         smtp_user=os.getenv("SMTP_USER") or None,
         smtp_password=os.getenv("SMTP_PASSWORD") or None,
         mail_from=os.getenv("MAIL_FROM", "LookFind <no-reply@lookfind.local>"),
+        # How much garment colour difference lowers the score (0 = embedding only).
+        color_weight=float(os.getenv("COLOR_WEIGHT", "0.15")),
     )

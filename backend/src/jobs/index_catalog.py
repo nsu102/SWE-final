@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PIL import Image
@@ -31,6 +32,14 @@ def parse_args() -> argparse.Namespace:
         "--skip-existing", action="store_true",
         help="do not recompute embeddings for goods already in the database",
     )
+    parser.add_argument(
+        "--refresh", action="store_true",
+        help="re-embed products whose selected image changed or that predate garment colour/crop",
+    )
+    parser.add_argument(
+        "--prune", action="store_true",
+        help="delete this platform's products that are no longer selected (e.g. now excluded)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -47,7 +56,10 @@ def load_records(products_path: Path, selections_path: Path, platform: str) -> l
     for line in selections_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        selection = json.loads(line)
+        try:
+            selection = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # a half-written line from an interrupted crawl; that product is redone
         if selection.get("status") != "selected":
             continue
         product = products.get(str(selection["goods_no"]))
@@ -85,6 +97,28 @@ def existing_goods_numbers(platform: str) -> set[str]:
     return {str(row["goods_no"]) for row in rows}
 
 
+def up_to_date_goods_numbers(platform: str, records: list[dict]) -> set[str]:
+    """Products already indexed from the same S3 image with the current (garment) pipeline."""
+    with connect_db() as connection:
+        rows = connection.execute(
+            "SELECT goods_no, s3_key FROM products WHERE platform = %s AND color_lab IS NOT NULL",
+            (platform,),
+        ).fetchall()
+    indexed = {str(row["goods_no"]): row["s3_key"] for row in rows}
+    return {
+        str(record["product"]["goods_no"]) for record in records
+        if indexed.get(str(record["product"]["goods_no"]), False) == record["s3_key"]
+    }
+
+
+def prune_unselected(platform: str, records: list[dict]) -> int:
+    keep = [str(record["product"]["goods_no"]) for record in records]
+    with connect_db() as connection:
+        return connection.execute(
+            "DELETE FROM products WHERE platform = %s AND NOT (goods_no = ANY(%s))", (platform, keep)
+        ).rowcount
+
+
 def plan_records(
     records: list[dict],
     existing: set[str],
@@ -115,13 +149,20 @@ def main() -> int:
     available_records = load_records(products_path, selections_path, args.platform)
     settings = get_settings()
     initialize_database()
-    existing = existing_goods_numbers(args.platform)
+    if args.prune:
+        if not available_records:
+            raise SystemExit("--prune with no selected records would empty the catalog")
+        print(f"Pruned {0 if args.dry_run else prune_unselected(args.platform, available_records)} unselected products", flush=True)
+    existing = (
+        up_to_date_goods_numbers(args.platform, available_records)
+        if args.refresh else existing_goods_numbers(args.platform)
+    )
     records = plan_records(
         available_records,
         existing,
         limit=args.limit,
         target_count=args.target_count,
-        skip_existing=args.skip_existing,
+        skip_existing=args.skip_existing or args.refresh,
     )
     target = args.target_count if args.target_count is not None else "not set"
     print(
@@ -134,18 +175,16 @@ def main() -> int:
 
     models = get_models()
     indexed = 0
+    pool = ThreadPoolExecutor(8)  # S3 downloads are I/O bound; the models stay single-threaded
     for start in range(0, len(records), args.batch_size):
         batch = records[start:start + args.batch_size]
-        images = [load_image(record, settings.s3_bucket) for record in batch]
-        # Match the query pipeline: crop to the garment so catalog embeddings are
-        # not dominated by model pose / background. Use the box (tight crop) view;
-        # falls back to the full image when no top is detected.
-        # ponytail: single box view to fit the one-vector schema. Store box+masked
-        # as multi-vector if recall needs it (query already embeds both views).
+        images = list(pool.map(lambda record: load_image(record, settings.s3_bucket), batch))
+        # Same pipeline as the query: embed only the garment (person/background painted grey),
+        # and keep its colour and box for colour reranking and display crops.
         prepared = [models.prepare_query(image) for image in images]
-        embeddings = models.embed([view.box_image for view in prepared])
+        embeddings = models.embed([view.search_image for view in prepared])
         with connect_db() as connection:
-            for record, embedding in zip(batch, embeddings):
+            for record, embedding, view in zip(batch, embeddings, prepared):
                 product = record["product"]
                 destination = None
                 if record["source"] and not record["s3_key"]:
@@ -157,8 +196,8 @@ def main() -> int:
                     INSERT INTO products (
                         platform, goods_no, goods_name, brand_name, price,
                         product_url, image_path, s3_bucket, s3_key,
-                        embedding, embedding_model
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s)
+                        embedding, embedding_model, color_lab, crop_box
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, %s, %s)
                     ON CONFLICT (platform, goods_no) DO UPDATE SET
                         goods_name = EXCLUDED.goods_name,
                         brand_name = EXCLUDED.brand_name,
@@ -169,6 +208,8 @@ def main() -> int:
                         s3_key = EXCLUDED.s3_key,
                         embedding = EXCLUDED.embedding,
                         embedding_model = EXCLUDED.embedding_model,
+                        color_lab = EXCLUDED.color_lab,
+                        crop_box = EXCLUDED.crop_box,
                         updated_at = now()
                 """, (
                     args.platform, product["goods_no"], product["goods_name"],
@@ -177,6 +218,8 @@ def main() -> int:
                     record["s3_bucket"] or settings.s3_bucket if record["s3_key"] else None,
                     record["s3_key"],
                     vector_literal(embedding.tolist()), settings.fashion_clip_model,
+                    list(view.color_lab) if view.color_lab else None,
+                    list(view.crop_box) if view.crop_box else None,
                 ))
         indexed += len(batch)
         print(f"Indexed {indexed}/{len(records)}", flush=True)

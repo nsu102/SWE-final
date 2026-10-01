@@ -24,6 +24,7 @@ fi
 set_status "phase=selection status=running"
 "$PYTHON_BIN" -m src.musinsa.select_images \
   --delay 0.3 \
+  --max-detail-images 50 \
   --delete-local-after-upload
 selection_exit=$?
 if (( selection_exit != 0 )); then

@@ -6,7 +6,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 rows_per_part="${SEED_ROWS_PER_PART:-25000}"
 psql_() { docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -tA'; }
-cols="platform, goods_no, goods_name, brand_name, price, product_url, embedding, embedding_model, s3_bucket, s3_key"
+cols="platform, goods_no, goods_name, brand_name, price, product_url, embedding, embedding_model, s3_bucket, s3_key, color_lab, crop_box"
 total=$(echo "SELECT count(*) FROM products" | psql_)
 parts=$(( (total + rows_per_part - 1) / rows_per_part ))
 
@@ -20,7 +20,7 @@ for (( i = 0; i < parts; i++ )); do
              '[' || array_to_string(ARRAY(
                SELECT round(x::numeric, 4)::real FROM unnest(embedding::real[]) x
              ), ',') || ']',
-             embedding_model, s3_bucket, s3_key
+             embedding_model, s3_bucket, s3_key, color_lab, crop_box
       FROM products ORDER BY platform, goods_no
       LIMIT $rows_per_part OFFSET $((i * rows_per_part))
     ) TO STDOUT" | psql_
