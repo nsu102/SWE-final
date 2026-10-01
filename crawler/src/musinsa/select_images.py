@@ -78,7 +78,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--delay", type=float, default=1.0, help="delay between product pages (per worker)")
     parser.add_argument("--workers", type=int, default=1, help="products processed concurrently")
-    parser.add_argument("--parser-size", default="448x288", help="human parser input HxW")
+    # Keep the model's native 576x384: at 448x288 it hallucinated "face" on flat garment shots.
+    parser.add_argument("--parser-size", default="576x384", help="human parser input HxW")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -141,6 +142,10 @@ def parse_gallery_urls(
         # e.g. DISPLAY_000_0006 "유효하지 않은 상품 입니다." (deleted / no longer sold)
         raise ProductUnavailable(f"{status.get('errorCode')}: {status.get('message')}")
     product = meta.get("data") or {}
+    # The page's current representative image; products.csv thumbnails go stale (404) when
+    # Musinsa re-uploads images.
+    if product.get("thumbnailImageUrl"):
+        thumbnail_url = urljoin(IMAGE_BASE, product["thumbnailImageUrl"])
     gallery = product.get("goodsImages")
     if gallery is None:
         for query in page_props.get("dehydratedState", {}).get("queries", []):
@@ -250,7 +255,8 @@ def load_completed(path: Path) -> set[str]:
             # "Excluded" only counts when every image was actually checked. If downloads failed
             # (e.g. the network dropped), the verdict is unreliable, so retry that product.
             if row.get("status") != "selected" and any(
-                candidate.get("error") for candidate in row.get("checked_images") or []
+                candidate.get("error") and "not found" not in candidate["error"]
+                for candidate in row.get("checked_images") or []
             ):
                 completed.discard(goods_no)
                 continue
@@ -369,10 +375,15 @@ def process_product(
             "model": args.model,
         }
 
+    unavailable = None
     try:
         urls = parse_gallery_urls(page_body, row.get("thumbnail_url"), args.max_detail_images)
     except ProductUnavailable as exc:
-        return {**excluded("product_unavailable", []), "message": str(exc)}
+        # No longer sold: the page is gone, but the crawled thumbnail may still be on the CDN.
+        unavailable = str(exc)
+        urls = [row["thumbnail_url"]] if row.get("thumbnail_url") else []
+        if not urls:
+            return {**excluded("product_unavailable", []), "message": unavailable}
     if not urls:
         raise ValueError("product gallery is empty")
 
@@ -433,7 +444,8 @@ def process_product(
             break
     pool.shutdown(wait=False, cancel_futures=True)
     if selected is None:
-        return excluded("no_person_free_top_image", candidates)
+        result = excluded("product_unavailable" if unavailable else "no_person_free_top_image", candidates)
+        return {**result, "message": unavailable} if unavailable else result
 
     index, url, image, human_ratio, top_ratio, top_mask, crop_box = selected
     if small_variant(url) != url and image.width < 500:
@@ -501,8 +513,6 @@ def main() -> int:
 
     device = select_device()
     print(f"Loading {args.model} on {device}...", flush=True)
-    # Only person/top area ratios are needed here, so a smaller input than the model default
-    # (576x384) is enough: 448x288 is ~2x faster with identical decisions on a catalog sample.
     height, width = (int(v) for v in args.parser_size.split("x"))
     processor = AutoImageProcessor.from_pretrained(args.model, size={"height": height, "width": width})
     model = SegformerForSemanticSegmentation.from_pretrained(args.model).to(device).eval()

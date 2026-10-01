@@ -34,6 +34,10 @@ for pass in 1 2 3; do
   echo "processed $processed/$total products"
   (( processed * 1000 >= total * 995 )) && break
 done
+if [[ "${SELECT_ONLY:-0}" == "1" ]]; then
+  echo "SELECT_ONLY=1: selection finished; skipping the backend re-embed"
+  exit 0
+fi
 if (( processed * 1000 < total * 995 )); then
   # --prune deletes products missing from the selections, so never index a partial run.
   echo "not indexing a partial run; rerun this script to retry the remaining products" >&2

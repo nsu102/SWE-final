@@ -34,7 +34,14 @@ class Fetcher:
             try:
                 with urlopen(Request(url, headers=headers), timeout=self.timeout) as response:
                     return response.read()
-            except (HTTPError, URLError, TimeoutError) as exc:
+            except HTTPError as exc:
+                if exc.code in (404, 410):  # gone for good: retrying only wastes time
+                    raise RuntimeError(f"not found ({exc.code}): {url}") from exc
+                last_error = exc
+                if attempt >= self.retries:
+                    break
+                time.sleep(min(2 ** attempt, 20) + random.random())
+            except (URLError, TimeoutError) as exc:
                 last_error = exc
                 if attempt >= self.retries:
                     break
