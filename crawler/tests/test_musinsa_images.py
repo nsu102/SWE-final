@@ -30,10 +30,6 @@ class DetailParserTest(unittest.TestCase):
         ]
         # Default: thumbnail + top gallery only; the 상품정보 (goodsContents) images are skipped.
         self.assertEqual(gallery, parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg"))
-        self.assertEqual(
-            gallery + ["https://image.msscdn.net/images/detail-3.jpg"],
-            parse_gallery_urls(html, "https://image.msscdn.net/images/main.jpg", max_detail_images=5),
-        )
 
     def test_unavailable_product_is_reported_not_crashing(self):
         document = {"props": {"pageProps": {"meta": {

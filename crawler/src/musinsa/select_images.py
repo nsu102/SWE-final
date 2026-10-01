@@ -14,7 +14,6 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import csv
 import hashlib
-from html.parser import HTMLParser
 import io
 import json
 import mimetypes
@@ -46,6 +45,8 @@ CDN_500 = re.compile(r"_500\.(jpe?g|png|webp|gif)$", re.IGNORECASE)
 
 def small_variant(url: str) -> str:
     return CDN_500.sub(r"_320.\1", url)
+FACE_IDS: list[int] = []  # filled in main() from the parser's labels
+BODY_EVIDENCE = 0.002
 HUMAN_LABELS = {"face", "hair", "arms", "hands", "legs", "feet"}
 
 
@@ -87,9 +88,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-threshold", type=float, default=0.05)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--retry-no-match", action="store_true")
-    # Only the thumbnail and top gallery are candidates; the 상품정보 (goodsContents) images are
-    # styling/detail shots, not catalog photos. Raise this only to experiment.
-    parser.add_argument("--max-detail-images", type=int, default=0)
     parser.add_argument(
         "--max-checks", type=int, default=40,
         help="stop after this many parsed views per product (tall detail sheets split into many)",
@@ -108,20 +106,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class _ImageSourceParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.urls: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() != "img":
-            return
-        values = dict(attrs)
-        url = values.get("data-src") or values.get("src")
-        if url:
-            self.urls.append(url)
-
-
 class ProductUnavailable(Exception):
     """Musinsa no longer serves this product; record it as excluded instead of retrying."""
 
@@ -129,7 +113,6 @@ class ProductUnavailable(Exception):
 def parse_gallery_urls(
     body: bytes,
     thumbnail_url: str | None = None,
-    max_detail_images: int = 0,
 ) -> list[str]:
     match = NEXT_DATA_RE.search(body)
     if not match:
@@ -162,10 +145,6 @@ def parse_gallery_urls(
         url = item.get("imageUrl") if isinstance(item, dict) else None
         if url:
             urls.append(urljoin(IMAGE_BASE, url))
-    if max_detail_images > 0 and product.get("goodsContents"):
-        parser = _ImageSourceParser()
-        parser.feed(product["goodsContents"])
-        urls.extend(urljoin(IMAGE_BASE, url) for url in parser.urls[:max_detail_images])
     # Preserve thumbnail -> gallery -> product-detail order and remove duplicates.
     return list(dict.fromkeys(urls))
 
@@ -197,7 +176,11 @@ def score_image(
     top_ids: list[int],
 ) -> tuple[float, float, np.ndarray]:
     prediction = predict_classes(image, processor, model, device)
-    human_ratio = float(np.isin(prediction, human_ids).mean())
+    # The parser hallucinates "face" (3-5%) on hood openings and necklines of flat garment shots.
+    # A real person also shows hair or limbs, so a face only counts alongside those.
+    body_ratio = float(np.isin(prediction, [i for i in human_ids if i not in FACE_IDS]).mean())
+    face_ratio = float(np.isin(prediction, FACE_IDS).mean())
+    human_ratio = body_ratio + (face_ratio if body_ratio >= BODY_EVIDENCE else 0.0)
     top_mask = np.isin(prediction, top_ids)
     top_ratio = float(top_mask.mean())
     return human_ratio, top_ratio, top_mask
@@ -377,7 +360,7 @@ def process_product(
 
     unavailable = None
     try:
-        urls = parse_gallery_urls(page_body, row.get("thumbnail_url"), args.max_detail_images)
+        urls = parse_gallery_urls(page_body, row.get("thumbnail_url"))
     except ProductUnavailable as exc:
         # No longer sold: the page is gone, but the crawled thumbnail may still be on the CDN.
         unavailable = str(exc)
@@ -496,7 +479,6 @@ def main() -> int:
         args.delay < 0
         or args.human_threshold < 0
         or args.top_threshold < 0
-        or args.max_detail_images < 0
     ):
         raise SystemExit("delay and thresholds must be non-negative")
     shard, shards = (int(part) for part in args.shard.split("/"))
@@ -522,6 +504,7 @@ def main() -> int:
     top_ids, labels = label_ids_for_tops(model.config.id2label)
     labels = {int(key): value for key, value in model.config.id2label.items()}
     human_ids = [idx for idx, label in labels.items() if label.lower() in HUMAN_LABELS]
+    FACE_IDS[:] = [idx for idx, label in labels.items() if label.lower() == "face"]
     print(f"Human classes: {[(i, labels[i]) for i in human_ids]}", flush=True)
 
     rows: list[dict[str, str]] = []
