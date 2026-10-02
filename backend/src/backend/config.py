@@ -25,6 +25,9 @@ class Settings:
     smtp_password: str | None
     mail_from: str
     color_weight: float
+    cookie_secure: bool
+    kakao_client_id: str | None
+    kakao_client_secret: str | None
 
 
 @lru_cache
@@ -55,4 +58,8 @@ def get_settings() -> Settings:
         mail_from=os.getenv("MAIL_FROM", "LookFind <no-reply@lookfind.local>"),
         # How much garment colour difference lowers the score (0 = embedding only).
         color_weight=float(os.getenv("COLOR_WEIGHT", "0.15")),
+        # The browser reaches the API through the frontend origin (Next.js proxy), so cookies follow its scheme.
+        cookie_secure=os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://"),
+        kakao_client_id=os.getenv("KAKAO_CLIENT_ID") or None,
+        kakao_client_secret=os.getenv("KAKAO_CLIENT_SECRET") or None,
     )

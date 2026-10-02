@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from src.backend.auth import FailureLimiter, bearer, hash_password, verify_password
+from src.backend.auth import FailureLimiter, hash_password, kakao_profile, verify_password
 from src.backend.db import color_distance, rerank_by_color, vector_literal
 from src.backend.ml import crop_to_box
 from src.jobs.index_catalog import plan_records
@@ -70,10 +70,14 @@ class BackendUtilityTest(unittest.TestCase):
         self.assertFalse(verify_password("wrong horse", stored))
         self.assertNotEqual(stored, hash_password("correct horse"))
 
-    def test_bearer_token_parsing(self):
-        self.assertEqual("abc", bearer("Bearer abc"))
-        self.assertIsNone(bearer("Basic abc"))
-        self.assertIsNone(bearer(None))
+    def test_kakao_profile_only_trusts_verified_email(self):
+        account = {"email": "Me@Kakao.com", "is_email_valid": True, "is_email_verified": True,
+                   "profile": {"nickname": "라희", "profile_image_url": "https://k.kakaocdn.net/a.jpg"}}
+        self.assertEqual(("42", "me@kakao.com", "라희", "https://k.kakaocdn.net/a.jpg"),
+                         kakao_profile({"id": 42, "kakao_account": account}))
+        self.assertEqual(("42", None, "라희", "https://k.kakaocdn.net/a.jpg"),
+                         kakao_profile({"id": 42, "kakao_account": {**account, "is_email_verified": False}}))
+        self.assertEqual(("7", None, None, None), kakao_profile({"id": 7}))
 
     def test_failure_limiter_blocks_after_limit_and_resets(self):
         limiter = FailureLimiter(limit=2, window=60)

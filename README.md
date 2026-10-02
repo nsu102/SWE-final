@@ -13,7 +13,7 @@ frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 유사 상품 결�
     │                                                                  ▲
     └──이미지──▶ [S3] ◀──presigned URL── [FastAPI /api/search] ─────────┘
                                                 ▲
-                                   [Next.js frontend] (브라우저에서 직접 호출, CORS)
+                                   [Next.js frontend] (/api·/media 프록시, HttpOnly 세션 쿠키)
 ```
 
 ## 빠른 시작
@@ -27,7 +27,7 @@ make backend    # http://127.0.0.1:8000  (API 문서: /docs)
 make frontend   # http://localhost:3000  (다른 터미널에서)
 ```
 
-회원가입 후 검색하면 ARCHIVE(검색 기록)와 SAVED(찜)가 DB에 저장됩니다. 로컬에는 메일 서버가 없으므로 비밀번호 찾기 링크는 `make backend` 터미널에 출력됩니다(`backend/.env`의 `SMTP_*`를 채우면 실제 메일 발송).
+이메일 회원가입 또는 카카오 로그인(`backend/.env`의 `KAKAO_CLIENT_ID` 필요) 후 검색하면 ARCHIVE(검색 기록)와 SAVED(찜)가 DB에 저장됩니다. 로컬에는 메일 서버가 없으므로 비밀번호 찾기 링크는 `make backend` 터미널에 출력됩니다(`backend/.env`의 `SMTP_*`를 채우면 실제 메일 발송).
 
 상품 이미지는 비공개 S3 버킷에 있으므로 `backend/.env`에 S3 읽기 권한이 있는 AWS 자격증명을 넣어야 결과 이미지가 보입니다. 첫 검색은 모델(사람 파서 + FashionSigLIP)을 내려받고 로딩하느라 수십 초가 걸리고, 이후 검색은 1초 이내입니다.
 
@@ -50,7 +50,7 @@ make test       # 백엔드·크롤러 unittest, 프런트 lint + build
 ## 배포
 
 - 백엔드: `backend/deploy/backend/` — EC2(Docker + Nginx) + RDS(PostgreSQL 16 + pgvector), S3는 IAM Role로 접근
-- 프런트엔드: Vercel 등 — 빌드 전에 `NEXT_PUBLIC_API_URL`을 백엔드 도메인으로, 백엔드 `CORS_ORIGINS`에 프런트 도메인 추가
+- 프런트엔드: Vercel 등 — `BACKEND_URL`을 백엔드 도메인으로 설정(Next.js가 `/api`, `/media`를 프록시). 백엔드 `FRONTEND_URL`을 프런트 도메인으로 설정하고 카카오 Redirect URI `{FRONTEND_URL}/api/auth/kakao/callback`을 등록
 
 ## 저장소 이력
 

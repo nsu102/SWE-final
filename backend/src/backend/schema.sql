@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS search_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Accounts. Passwords are scrypt hashes; sessions store only a SHA-256 of the bearer token.
+-- Accounts. Passwords are scrypt hashes; sessions store only a SHA-256 of the session cookie token.
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
@@ -105,3 +105,10 @@ CREATE TABLE IF NOT EXISTS password_resets (
 -- garment box (fractions of width/height) used to crop product photos for display.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_lab REAL[];
 ALTER TABLE products ADD COLUMN IF NOT EXISTS crop_box REAL[];
+
+-- Kakao login: a Kakao-only account has no password and may have no email (not shared or unverified).
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kakao_id TEXT UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;

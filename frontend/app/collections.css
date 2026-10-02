@@ -210,10 +210,9 @@
 }
 
 .login-intro { display: flex; flex-direction: column; justify-content: center; }
-.login-intro p,
+.login-intro p { margin: 0 0 24px; font-size: clamp(18px, 1.7vw, 24px); font-weight: 400; line-height: 1.2; letter-spacing: 1.2px; }
 .login-panel > p { margin: 0 0 14px; font-size: 10px; font-weight: 800; letter-spacing: .8px; }
 .login-intro h1 { margin: 0; font-size: clamp(68px, 10vw, 150px); line-height: .76; letter-spacing: -.1em; }
-.login-intro span { margin-top: 36px; color: #527075; font-size: 13px; }
 
 .login-panel {
   align-self: center;

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import io
+import logging
 import re
+import secrets
 import time
 import uuid
 from functools import lru_cache
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlencode
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+import httpx
+
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
@@ -18,8 +24,8 @@ from psycopg.errors import ForeignKeyViolation, UniqueViolation
 from pydantic import BaseModel
 
 from src.backend.auth import (
-    FailureLimiter, bearer, create_reset_token, create_session, hash_password, optional_user,
-    raise_if_limited, require_user, send_reset_mail, token_hash, verify_password,
+    SESSION_COOKIE, FailureLimiter, create_reset_token, hash_password, kakao_user, optional_user,
+    raise_if_limited, require_user, send_reset_mail, set_session_cookie, token_hash, verify_password,
 )
 from src.backend.config import get_settings
 from src.backend.db import connect_db, count_products, initialize_database, search_similar
@@ -53,13 +59,11 @@ class Credentials(BaseModel):
     password: str
 
 
-class Session(BaseModel):
-    token: str
+class User(BaseModel):
+    id: str
     email: str
-
-
-class Account(BaseModel):
-    email: str
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 class ResetRequest(BaseModel):
@@ -72,17 +76,41 @@ class PasswordReset(BaseModel):
 
 
 class HistoryItem(BaseModel):
-    id: int
+    id: str
     label: str
     searched_at: str
     count: int
-    thumb: str | None
+    image_url: str | None
+
+
+class HistoryPage(BaseModel):
+    items: list[HistoryItem]
+    next_cursor: int | None
+
+
+class HistoryDetail(HistoryItem):
+    results: list[SearchResult]
+
+
+class HistoryIds(BaseModel):
+    ids: list[str]
+
+
+class DeletedHistory(BaseModel):
+    deleted_ids: list[str]
+
+
+class RestoredHistory(BaseModel):
+    restored: int
 
 
 PRODUCT_COLUMNS = (
     "p.platform, p.goods_no, p.goods_name, p.brand_name, p.price, p.product_url, "
     "p.image_path, p.s3_bucket, p.s3_key"
 )
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def to_result(row: dict) -> SearchResult:
@@ -263,8 +291,23 @@ def valid_credentials(body: Credentials) -> tuple[str, str]:
     return email, valid_password(body.password)
 
 
-@app.post("/api/auth/signup", response_model=Session, status_code=201)
-def signup(body: Credentials) -> Session:
+def load_user(user_id: int) -> User:
+    with connect_db() as connection:
+        row = connection.execute(
+            "SELECT id, email, display_name, avatar_url FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="로그인이 필요해요.")
+    return User(id=str(row["id"]), email=row["email"] or "", display_name=row["display_name"], avatar_url=row["avatar_url"])
+
+
+def sign_in(response: Response, user_id: int) -> User:
+    set_session_cookie(response, user_id)
+    return load_user(user_id)
+
+
+@app.post("/api/auth/register", response_model=User, status_code=201)
+def register(body: Credentials, response: Response) -> User:
     email, password = valid_credentials(body)
     try:
         with connect_db() as connection:
@@ -274,11 +317,11 @@ def signup(body: Credentials) -> Session:
             ).fetchone()
     except UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="이미 가입된 이메일이에요.") from exc
-    return Session(token=create_session(user["id"]), email=email)
+    return sign_in(response, user["id"])
 
 
-@app.post("/api/auth/login", response_model=Session)
-def login(body: Credentials, request: Request) -> Session:
+@app.post("/api/auth/login", response_model=User)
+def login(body: Credentials, request: Request, response: Response) -> User:
     email = body.email.strip().lower()
     ip = client_ip(request)
     key = f"{ip}|{email}"
@@ -288,12 +331,13 @@ def login(body: Credentials, request: Request) -> Session:
         user = connection.execute(
             "SELECT id, password_hash FROM users WHERE email = %s", (email,)
         ).fetchone()
-    if not user or not verify_password(body.password, user["password_hash"]):
+    # Kakao-only accounts have no password_hash and can't log in with a password.
+    if not user or not user["password_hash"] or not verify_password(body.password, user["password_hash"]):
         login_failures.hit(key)
         ip_failures.hit(ip)
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 맞지 않아요.")
     login_failures.reset(key)
-    return Session(token=create_session(user["id"]), email=email)
+    return sign_in(response, user["id"])
 
 
 @app.post("/api/auth/reset-request", status_code=204)
@@ -310,8 +354,8 @@ def reset_request(body: ResetRequest, request: Request, background: BackgroundTa
     return Response(status_code=204)
 
 
-@app.post("/api/auth/reset", response_model=Session)
-def reset_password(body: PasswordReset, request: Request) -> Session:
+@app.post("/api/auth/reset", response_model=User)
+def reset_password(body: PasswordReset, request: Request, response: Response) -> User:
     password_hash = hash_password(valid_password(body.password))
     with connect_db() as connection:
         row = connection.execute(
@@ -329,81 +373,166 @@ def reset_password(body: PasswordReset, request: Request) -> Session:
         connection.execute("DELETE FROM sessions WHERE user_id = %s", (user["id"],))
     # The owner proved access to the mailbox, so lift any wrong-password lockout from this IP.
     login_failures.reset(f"{client_ip(request)}|{user['email']}")
-    return Session(token=create_session(user["id"]), email=user["email"])
+    return sign_in(response, user["id"])
 
 
 @app.post("/api/auth/logout", status_code=204)
-def logout(authorization: str | None = Header(None)) -> Response:
-    token = bearer(authorization)
-    if token:
+def logout(session: str | None = Cookie(None, alias=SESSION_COOKIE)) -> Response:
+    if session:
         with connect_db() as connection:
-            connection.execute("DELETE FROM sessions WHERE token_hash = %s", (token_hash(token),))
-    return Response(status_code=204)
+            connection.execute("DELETE FROM sessions WHERE token_hash = %s", (token_hash(session),))
+    response = Response(status_code=204)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
-@app.get("/api/auth/me", response_model=Account)
-def me(user_id: int = Depends(require_user)) -> Account:
-    with connect_db() as connection:
-        row = connection.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
-    return Account(email=row["email"])
+@app.get("/api/auth/me", response_model=User)
+def me(user_id: int = Depends(require_user)) -> User:
+    return load_user(user_id)
 
 
-@app.get("/api/history", response_model=list[HistoryItem])
-def history(user_id: int = Depends(require_user)) -> list[HistoryItem]:
+KAKAO_STATE_COOKIE = "lookfind_kakao_state"
+KAKAO_COOKIE_PATH = "/api/auth/kakao"
+
+
+def kakao_redirect_uri() -> str:
+    # Register this exact URI in Kakao Developers (the frontend proxies it to the backend).
+    return f"{settings.frontend_url}/api/auth/kakao/callback"
+
+
+def kakao_failed() -> RedirectResponse:
+    response = RedirectResponse(f"{settings.frontend_url}/?login_error=kakao", status_code=302)
+    response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_COOKIE_PATH)
+    return response
+
+
+@app.get("/api/auth/kakao")
+def kakao_start() -> RedirectResponse:
+    if not settings.kakao_client_id:
+        logger.warning("KAKAO_CLIENT_ID is not set; Kakao login is disabled.")
+        return kakao_failed()
+    state = secrets.token_urlsafe(24)
+    query = urlencode({
+        "client_id": settings.kakao_client_id, "redirect_uri": kakao_redirect_uri(),
+        "response_type": "code", "state": state,
+    })
+    response = RedirectResponse(f"https://kauth.kakao.com/oauth/authorize?{query}", status_code=302)
+    # Lax still reaches the callback: Kakao sends the browser back with a top-level GET.
+    response.set_cookie(KAKAO_STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax",
+                        secure=settings.cookie_secure, path=KAKAO_COOKIE_PATH)
+    return response
+
+
+@app.get("/api/auth/kakao/callback")
+def kakao_callback(
+    code: str = "", state: str = "", error: str = "",
+    expected_state: str | None = Cookie(None, alias=KAKAO_STATE_COOKIE),
+) -> RedirectResponse:
+    if error or not code or not expected_state or not hmac.compare_digest(state, expected_state):
+        return kakao_failed()
+    try:
+        token = httpx.post("https://kauth.kakao.com/oauth/token", timeout=10, data={
+            "grant_type": "authorization_code", "client_id": settings.kakao_client_id,
+            "redirect_uri": kakao_redirect_uri(), "code": code,
+            **({"client_secret": settings.kakao_client_secret} if settings.kakao_client_secret else {}),
+        }).raise_for_status().json()["access_token"]
+        profile = httpx.get("https://kapi.kakao.com/v2/user/me", timeout=10,
+                            headers={"Authorization": f"Bearer {token}"}).raise_for_status().json()
+        user_id = kakao_user(profile)
+    except (httpx.HTTPError, KeyError, ValueError):
+        logger.exception("Kakao login failed")
+        return kakao_failed()
+    response = RedirectResponse(f"{settings.frontend_url}/", status_code=302)
+    response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_COOKIE_PATH)
+    set_session_cookie(response, user_id)
+    return response
+
+
+HISTORY_PAGE = 24
+UNDO_WINDOW = "10 minutes"
+
+
+def to_history(row: dict) -> HistoryItem:
+    return HistoryItem(
+        id=str(row["id"]), label=row["label"] or "업로드 사진", count=row["result_count"],
+        image_url=row["thumb"], searched_at=row["created_at"].isoformat(),
+    )
+
+
+def event_ids(ids: list[str]) -> list[int]:
+    if len(ids) > 1000 or not all(value.isdigit() for value in ids):
+        raise HTTPException(status_code=422, detail="잘못된 기록 ID예요.")
+    return [int(value) for value in ids]
+
+
+@app.get("/api/history", response_model=HistoryPage)
+def history(before: int | None = Query(None, ge=1), user_id: int = Depends(require_user)) -> HistoryPage:
     with connect_db() as connection:
         rows = connection.execute(
             "SELECT id, label, created_at, result_count, thumb FROM search_events "
-            "WHERE user_id = %s AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 50",
-            (user_id,),
+            "WHERE user_id = %s AND hidden_at IS NULL AND (%s::bigint IS NULL OR id < %s) "
+            "ORDER BY id DESC LIMIT %s",
+            (user_id, before, before, HISTORY_PAGE + 1),
         ).fetchall()
-    return [HistoryItem(
-        id=row["id"], label=row["label"] or "업로드 사진", count=row["result_count"], thumb=row["thumb"],
-        searched_at=row["created_at"].isoformat(),
-    ) for row in rows]
+    items = [to_history(row) for row in rows[:HISTORY_PAGE]]
+    return HistoryPage(items=items, next_cursor=int(items[-1].id) if len(rows) > HISTORY_PAGE else None)
 
 
-@app.get("/api/history/{event_id}", response_model=list[SearchResult])
-def history_results(event_id: int, user_id: int = Depends(require_user)) -> list[SearchResult]:
+@app.get("/api/history/{event_id}", response_model=HistoryDetail)
+def history_detail(event_id: int, user_id: int = Depends(require_user)) -> HistoryDetail:
     with connect_db() as connection:
+        event = connection.execute(
+            "SELECT id, label, created_at, result_count, thumb FROM search_events "
+            "WHERE id = %s AND user_id = %s AND hidden_at IS NULL",
+            (event_id, user_id),
+        ).fetchone()
+        if not event:
+            raise HTTPException(status_code=404, detail="검색 기록을 찾을 수 없어요.")
         rows = connection.execute(
             f"SELECT {PRODUCT_COLUMNS}, r.similarity FROM search_results r "
-            "JOIN search_events e ON e.id = r.event_id "
             "JOIN products p ON p.platform = r.platform AND p.goods_no = r.goods_no "
-            "WHERE r.event_id = %s AND e.user_id = %s ORDER BY r.rank",
-            (event_id, user_id),
+            "WHERE r.event_id = %s ORDER BY r.rank",
+            (event_id,),
         ).fetchall()
-    return [to_result(row) for row in rows]
+    return HistoryDetail(**to_history(event).model_dump(), results=[to_result(row) for row in rows])
 
 
-@app.delete("/api/history/{event_id}", status_code=204)
-def remove_history(event_id: int, user_id: int = Depends(require_user)) -> Response:
-    # Removing one entry detaches it from the account; the anonymous search log row stays.
-    with connect_db() as connection:
-        connection.execute("DELETE FROM search_results WHERE event_id = %s AND event_id IN "
-                           "(SELECT id FROM search_events WHERE user_id = %s)", (event_id, user_id))
-        connection.execute("UPDATE search_events SET user_id = NULL, thumb = NULL "
-                           "WHERE id = %s AND user_id = %s", (event_id, user_id))
-    return Response(status_code=204)
-
-
-@app.delete("/api/history", status_code=204)
-def clear_history(user_id: int = Depends(require_user)) -> Response:
-    with connect_db() as connection:
-        connection.execute("UPDATE search_events SET hidden_at = now() "
-                           "WHERE user_id = %s AND hidden_at IS NULL", (user_id,))
-    return Response(status_code=204)
-
-
-@app.post("/api/history/restore", status_code=204)
-def restore_history(user_id: int = Depends(require_user)) -> Response:
-    # Undo the most recent CLEAR ALL (all rows hidden in that statement share its now()).
+def hide_history(user_id: int, event_id: int | None) -> DeletedHistory:
+    """Soft-delete (RETURN can undo it for 10 minutes); entries hidden longer ago leave the account for good."""
     with connect_db() as connection:
         connection.execute(
-            "UPDATE search_events SET hidden_at = NULL WHERE user_id = %s AND hidden_at = "
-            "(SELECT max(hidden_at) FROM search_events WHERE user_id = %s)",
-            (user_id, user_id),
+            "WITH expired AS (UPDATE search_events SET user_id = NULL, thumb = NULL, hidden_at = NULL "
+            f"WHERE user_id = %s AND hidden_at < now() - interval '{UNDO_WINDOW}' RETURNING id) "
+            "DELETE FROM search_results WHERE event_id IN (SELECT id FROM expired)",
+            (user_id,),
         )
-    return Response(status_code=204)
+        rows = connection.execute(
+            "UPDATE search_events SET hidden_at = now() WHERE user_id = %s AND hidden_at IS NULL "
+            "AND (%s::bigint IS NULL OR id = %s) RETURNING id",
+            (user_id, event_id, event_id),
+        ).fetchall()
+    return DeletedHistory(deleted_ids=[str(row["id"]) for row in rows])
+
+
+@app.delete("/api/history/{event_id}", response_model=DeletedHistory)
+def remove_history(event_id: int, user_id: int = Depends(require_user)) -> DeletedHistory:
+    return hide_history(user_id, event_id)
+
+
+@app.delete("/api/history", response_model=DeletedHistory)
+def clear_history(user_id: int = Depends(require_user)) -> DeletedHistory:
+    return hide_history(user_id, None)
+
+
+@app.post("/api/history/restore", response_model=RestoredHistory)
+def restore_history(body: HistoryIds, user_id: int = Depends(require_user)) -> RestoredHistory:
+    with connect_db() as connection:
+        restored = connection.execute(
+            "UPDATE search_events SET hidden_at = NULL WHERE user_id = %s AND id = ANY(%s) "
+            f"AND hidden_at >= now() - interval '{UNDO_WINDOW}'",
+            (user_id, event_ids(body.ids)),
+        ).rowcount
+    return RestoredHistory(restored=restored)
 
 
 @app.get("/api/favorites", response_model=list[SearchResult])

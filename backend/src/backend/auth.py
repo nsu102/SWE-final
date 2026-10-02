@@ -1,4 +1,4 @@
-"""Email/password accounts with opaque bearer tokens (stdlib scrypt, no extra deps)."""
+"""Email/password and Kakao accounts with opaque session tokens in an HttpOnly cookie (stdlib scrypt)."""
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +12,7 @@ import time
 from collections import defaultdict, deque
 from email.message import EmailMessage
 
-from fastapi import Header, HTTPException
+from fastapi import Cookie, HTTPException, Response
 
 from src.backend.config import get_settings
 from src.backend.db import connect_db
@@ -20,6 +20,7 @@ from src.backend.db import connect_db
 logger = logging.getLogger("uvicorn.error")
 
 SESSION_DAYS = 30
+SESSION_COOKIE = "lookfind_session"
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -50,31 +51,64 @@ def create_session(user_id: int) -> str:
     return token
 
 
-def bearer(authorization: str | None) -> str | None:
-    if authorization and authorization.lower().startswith("bearer "):
-        return authorization[7:].strip() or None
-    return None
+def set_session_cookie(response: Response, user_id: int) -> None:
+    response.set_cookie(
+        SESSION_COOKIE, create_session(user_id), max_age=SESSION_DAYS * 86400,
+        httponly=True, samesite="lax", secure=get_settings().cookie_secure, path="/",
+    )
 
 
-def optional_user(authorization: str | None = Header(None)) -> int | None:
-    token = bearer(authorization)
-    if not token:
+def optional_user(session: str | None = Cookie(None, alias=SESSION_COOKIE)) -> int | None:
+    # An expired/unknown cookie means "anonymous": the browser can't drop an HttpOnly cookie itself,
+    # so failing here would break anonymous search until the user logs out.
+    if not session:
         return None
     with connect_db() as connection:
         row = connection.execute(
             "SELECT user_id FROM sessions WHERE token_hash = %s AND expires_at > now()",
-            (token_hash(token),),
+            (token_hash(session),),
         ).fetchone()
-    if not row:
-        raise HTTPException(status_code=401, detail="session expired")
-    return int(row["user_id"])
+    return int(row["user_id"]) if row else None
 
 
-def require_user(authorization: str | None = Header(None)) -> int:
-    user_id = optional_user(authorization)
+def require_user(session: str | None = Cookie(None, alias=SESSION_COOKIE)) -> int:
+    user_id = optional_user(session)
     if user_id is None:
-        raise HTTPException(status_code=401, detail="login required")
+        raise HTTPException(status_code=401, detail="로그인이 필요해요.")
     return user_id
+
+
+def kakao_profile(profile: dict) -> tuple[str, str | None, str | None, str | None]:
+    """(kakao_id, verified email or None, nickname, avatar) from Kakao /v2/user/me."""
+    account = profile.get("kakao_account") or {}
+    info = account.get("profile") or {}
+    verified = account.get("is_email_valid") and account.get("is_email_verified")
+    email = (account.get("email") or "").strip().lower() if verified else ""
+    return str(profile["id"]), email or None, info.get("nickname"), info.get("profile_image_url")
+
+
+def kakao_user(profile: dict) -> int:
+    """Find or create the account for a Kakao profile. A verified Kakao email links to the same email account."""
+    kakao_id, email, name, avatar = kakao_profile(profile)
+    with connect_db() as connection:
+        row = connection.execute(
+            "UPDATE users SET display_name = %s, avatar_url = %s WHERE kakao_id = %s RETURNING id",
+            (name, avatar, kakao_id),
+        ).fetchone()
+        if not row and email:
+            row = connection.execute(
+                "UPDATE users SET kakao_id = %s, display_name = COALESCE(display_name, %s), "
+                "avatar_url = COALESCE(avatar_url, %s) WHERE email = %s AND kakao_id IS NULL RETURNING id",
+                (kakao_id, name, avatar, email),
+            ).fetchone()
+        if not row:
+            # The email can already belong to an account linked to another Kakao id; then store none.
+            taken = email and connection.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone()
+            row = connection.execute(
+                "INSERT INTO users (email, kakao_id, display_name, avatar_url) VALUES (%s, %s, %s, %s) RETURNING id",
+                (None if taken else email, kakao_id, name, avatar),
+            ).fetchone()
+    return int(row["id"])
 
 
 class FailureLimiter:
