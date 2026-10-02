@@ -39,7 +39,7 @@ def get_settings() -> Settings:
             "DATABASE_URL", "postgresql://fashion:fashion@localhost:5432/fashion"
         ),
         storage_root=Path(os.getenv("LOCAL_STORAGE_ROOT", "storage")).resolve(),
-        fashion_clip_model=os.getenv("FASHION_CLIP_MODEL", "Marqo/marqo-fashionSigLIP"),
+        fashion_clip_model=os.getenv("FASHION_CLIP_MODEL", "yainage90/fashion-image-feature-extractor"),
         human_parser_model=os.getenv("HUMAN_PARSER_MODEL", "fashn-ai/fashn-human-parser"),
         max_upload_bytes=int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024,
         cors_origins=origins,

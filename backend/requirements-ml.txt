@@ -4,5 +4,3 @@ transformers>=4.45
 Pillow>=10
 numpy>=1.26
 safetensors>=0.4
-open_clip_torch>=2.24
-ftfy>=6.1

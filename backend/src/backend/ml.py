@@ -1,3 +1,10 @@
+"""Street-to-shop embeddings (yainage90).
+
+Query photos (often a person wearing the top) are cropped to the detected top/outer, then embedded
+with yainage90/fashion-image-feature-extractor, which was trained on exactly that pairing: garment
+crops from user posts vs. product thumbnails. Catalog images are person-free product shots and are
+embedded whole, like the thumbnails the model was trained on.
+"""
 from __future__ import annotations
 
 import threading
@@ -5,86 +12,78 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms as v2
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 from PIL import Image
-import open_clip
-from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
+from transformers import AutoImageProcessor, AutoModelForObjectDetection, SwinConfig, SwinModel
 
 from src.backend.config import get_settings
-from src.common.human_parser import label_ids_for_tops, select_device
+from src.common.human_parser import select_device
 
-
-def rgb_to_lab(rgb: np.ndarray) -> np.ndarray:
-    """sRGB uint8 pixels (N, 3) -> CIE Lab (D65)."""
-    c = rgb.astype(np.float32) / 255
-    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
-    xyz = c @ np.array(
-        [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]],
-        dtype=np.float32,
-    ).T / np.array([0.95047, 1.0, 1.08883], dtype=np.float32)
-    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
-    return np.stack(
-        [116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], axis=1
-    )
-
-
-def garment_color(image: Image.Image, mask: np.ndarray) -> tuple[float, float, float]:
-    """Median Lab colour of the garment pixels (median ignores small prints/shadows)."""
-    pixels = np.asarray(image.convert("RGB"))[mask]
-    if len(pixels) > 20_000:
-        pixels = pixels[:: len(pixels) // 20_000]
-    lab = np.median(rgb_to_lab(pixels), axis=0)
-    return float(lab[0]), float(lab[1]), float(lab[2])
+DETECTOR = "yainage90/fashion-object-detection"
+TOP_LABELS = {"top", "outer"}
 
 
 @dataclass(frozen=True)
 class PreparedImage:
     box_image: Image.Image
-    masked_image: Image.Image | None
-    used_top_mask: bool
-    top_ratio: float
+    used_top_mask: bool  # a top/outer was detected and the photo was cropped to it
+    top_ratio: float  # detected box area / photo area
+    masked_image: Image.Image | None = None
     color_lab: tuple[float, float, float] | None = None
-    # Garment box as fractions of width/height (x0, y0, x1, y1), for display crops.
     crop_box: tuple[float, float, float, float] | None = None
 
     @property
     def search_image(self) -> Image.Image:
-        """Garment only (person/background painted grey) when a top was found."""
-        return self.masked_image if self.masked_image is not None else self.box_image
+        return self.box_image
 
 
-def prepare_query_views(
-    image: Image.Image, mask: np.ndarray, min_top_ratio: float = 0.015
-) -> PreparedImage:
-    image = image.convert("RGB")
-    ratio = float(mask.mean())
-    if ratio < min_top_ratio:
-        return PreparedImage(
-            box_image=image, masked_image=None, used_top_mask=False, top_ratio=ratio
-        )
-
-    ys, xs = np.nonzero(mask)
-    left, right = int(xs.min()), int(xs.max()) + 1
-    top, bottom = int(ys.min()), int(ys.max()) + 1
-    pad_x = round((right - left) * 0.08)
-    pad_y = round((bottom - top) * 0.08)
-    box = (
-        max(0, left - pad_x), max(0, top - pad_y),
-        min(image.width, right + pad_x), min(image.height, bottom + pad_y),
-    )
-    neutral = Image.new("RGB", image.size, (217, 217, 217))
-    neutral.paste(image, mask=Image.fromarray((mask * 255).astype(np.uint8), mode="L"))
+def crop_to_box(image: Image.Image, box: list[float] | None) -> PreparedImage:
+    if box is None:
+        return PreparedImage(box_image=image, used_top_mask=False, top_ratio=0.0)
+    x0, y0, x1, y1 = (max(0.0, box[0]), max(0.0, box[1]), min(image.width, box[2]), min(image.height, box[3]))
+    area = (x1 - x0) * (y1 - y0) / (image.width * image.height)
     return PreparedImage(
-        box_image=image.crop(box),
-        masked_image=neutral.crop(box),
-        used_top_mask=True,
-        top_ratio=ratio,
-        color_lab=garment_color(image, mask),
-        crop_box=(
-            box[0] / image.width, box[1] / image.height,
-            box[2] / image.width, box[3] / image.height,
-        ),
+        box_image=image.crop((round(x0), round(y0), round(x1), round(y1))),
+        used_top_mask=True, top_ratio=float(area),
     )
+
+
+class ImageEncoder(nn.Module):
+    def __init__(self, config: SwinConfig) -> None:
+        super().__init__()
+        self.swin = SwinModel(config)
+        self.embedding_layer = nn.Linear(config.hidden_size, 128)
+
+    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
+        return F.normalize(self.embedding_layer(self.swin(pixels).pooler_output), p=2, dim=1)
+
+
+# The checkpoint uses the older transformers Swin parameter names. Loading it through
+# PyTorchModelHubMixin silently left 336 of 449 tensors random, so map names and load strictly.
+SWIN_RENAMES = [
+    (".attention.self.query.", ".attention.q_proj."), (".attention.self.key.", ".attention.k_proj."),
+    (".attention.self.value.", ".attention.v_proj."), (".attention.output.dense.", ".attention.o_proj."),
+    (".attention.self.relative_position_bias_table",
+     ".attention.relative_position_bias.relative_position_bias_table"),
+    (".intermediate.dense.", ".mlp.fc1."), (".output.dense.", ".mlp.fc2."),
+]
+
+
+def load_encoder(checkpoint: str, config: SwinConfig) -> ImageEncoder:
+    encoder = ImageEncoder(config)
+    state = {}
+    for key, value in load_file(hf_hub_download(checkpoint, "model.safetensors")).items():
+        if key.endswith("relative_position_index"):  # recomputed buffer
+            continue
+        for old, new in SWIN_RENAMES:
+            key = key.replace(old, new)
+        state[key] = value
+    encoder.load_state_dict(state, strict=True)
+    return encoder
 
 
 class FashionModels:
@@ -92,54 +91,36 @@ class FashionModels:
         settings = get_settings()
         self.device = select_device()
         self._lock = threading.Lock()
-        # marqo-fashionSigLIP is an open_clip checkpoint. Loading it via transformers
-        # AutoModel(trust_remote_code) hits a meta-tensor bug in this transformers version,
-        # so use open_clip directly (Marqo's documented path). image-only: no tokenizer.
-        clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
-            f"hf-hub:{settings.fashion_clip_model}"
-        )
-        self.clip_model = clip_model.to(self.device).eval()
-        self.clip_preprocess = clip_preprocess
-        self.human_parser_model = settings.human_parser_model
-        self.parser_processor: AutoImageProcessor | None = None
-        self.parser_model: SegformerForSemanticSegmentation | None = None
-        self.top_ids: list[int] | None = None
+        self.detector_processor = AutoImageProcessor.from_pretrained(DETECTOR)
+        self.detector = AutoModelForObjectDetection.from_pretrained(DETECTOR).to(self.device).eval()
+        self.labels = self.detector.config.id2label
 
-    def _ensure_parser(self) -> None:
-        if self.parser_model is not None:
-            return
-        self.parser_processor = AutoImageProcessor.from_pretrained(self.human_parser_model)
-        self.parser_model = SegformerForSemanticSegmentation.from_pretrained(
-            self.human_parser_model
-        ).to(self.device).eval()
-        self.top_ids, _ = label_ids_for_tops(self.parser_model.config.id2label)
+        config = SwinConfig.from_pretrained(settings.fashion_clip_model)
+        processor = AutoImageProcessor.from_pretrained(settings.fashion_clip_model)
+        self.encoder = load_encoder(settings.fashion_clip_model, config).to(self.device).eval()
+        self.transform = v2.Compose([
+            v2.Resize((config.image_size, config.image_size)), v2.ToTensor(),
+            v2.Normalize(mean=processor.image_mean, std=processor.image_std),
+        ])
 
-    def prepare_query(self, image: Image.Image, min_top_ratio: float = 0.015) -> PreparedImage:
+    def prepare_query(self, image: Image.Image, threshold: float = 0.4) -> PreparedImage:
+        """Crop to the largest detected top/outer; the whole photo when none is found."""
         image = image.convert("RGB")
-        with self._lock:
-            self._ensure_parser()
-        assert self.parser_processor is not None
-        assert self.parser_model is not None
-        assert self.top_ids is not None
         with self._lock, torch.inference_mode():
-            inputs = self.parser_processor(images=image, return_tensors="pt")
-            inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            # Upsample on CPU: per-image output sizes would make MPS build a new graph every call.
-            logits = self.parser_model(**inputs).logits.float().cpu()
-            logits = F.interpolate(
-                logits, size=(image.height, image.width), mode="bilinear", align_corners=False
-            )
-            prediction = logits.argmax(dim=1)[0].cpu().numpy()
-        mask = np.isin(prediction, self.top_ids)
-        return prepare_query_views(image, mask, min_top_ratio)
+            inputs = self.detector_processor(images=[image], return_tensors="pt").to(self.device)
+            result = self.detector_processor.post_process_object_detection(
+                self.detector(**inputs), threshold=threshold,
+                target_sizes=torch.tensor([[image.height, image.width]]),
+            )[0]
+        boxes = [box.tolist() for label, box in zip(result["labels"], result["boxes"])
+                 if self.labels[int(label)] in TOP_LABELS]
+        largest = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1])) if boxes else None
+        return crop_to_box(image, largest)
 
     def embed(self, images: list[Image.Image]) -> np.ndarray:
         with self._lock, torch.inference_mode():
-            pixel_values = torch.stack(
-                [self.clip_preprocess(image.convert("RGB")) for image in images]
-            ).to(self.device)
-            features = self.clip_model.encode_image(pixel_values)
-            features = F.normalize(features, p=2, dim=-1)
+            pixels = torch.stack([self.transform(image.convert("RGB")) for image in images]).to(self.device)
+            features = self.encoder(pixels)
         return features.cpu().numpy().astype(np.float32)
 
 

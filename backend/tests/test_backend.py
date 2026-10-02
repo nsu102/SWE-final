@@ -6,7 +6,7 @@ from PIL import Image
 
 from src.backend.auth import FailureLimiter, bearer, hash_password, verify_password
 from src.backend.db import color_distance, rerank_by_color, vector_literal
-from src.backend.ml import FashionModels, prepare_query_views, rgb_to_lab
+from src.backend.ml import crop_to_box
 from src.jobs.index_catalog import plan_records
 
 
@@ -42,22 +42,15 @@ class BackendUtilityTest(unittest.TestCase):
         )
         self.assertEqual(["2", "3"], [row["product"]["goods_no"] for row in planned])
 
-    def test_prepare_query_views_returns_box_and_masked_crop(self):
-        image = Image.new("RGB", (100, 120), (255, 0, 0))
-        mask = np.zeros((120, 100), dtype=bool)
-        mask[20:100, 25:75] = True
-        prepared = prepare_query_views(image, mask)
-        self.assertTrue(prepared.used_top_mask)
-        self.assertEqual(prepared.box_image.size, prepared.masked_image.size)
-        self.assertIs(prepared.masked_image, prepared.search_image)
-        self.assertEqual((0.21, 0.12, 0.79, 0.88), tuple(round(v, 2) for v in prepared.crop_box))  # 8% padding
-        # Pure red garment: Lab ≈ (53, 80, 67).
-        self.assertEqual((53, 80, 67), tuple(round(v) for v in prepared.color_lab))
-        self.assertEqual((217, 217, 217), prepared.masked_image.getpixel((0, 0)))
-
-    def test_rgb_to_lab_reference_colours(self):
-        lab = rgb_to_lab(np.array([[255, 255, 255], [0, 0, 0]], dtype=np.uint8))
-        np.testing.assert_allclose(lab, [[100, 0, 0], [0, 0, 0]], atol=0.5)
+    def test_crop_to_box_crops_detected_top_or_keeps_photo(self):
+        image = Image.new("RGB", (100, 200))
+        cropped = crop_to_box(image, [10.0, 20.0, 60.0, 120.0])
+        self.assertTrue(cropped.used_top_mask)
+        self.assertEqual((50, 100), cropped.search_image.size)
+        self.assertAlmostEqual(0.25, cropped.top_ratio)
+        whole = crop_to_box(image, None)
+        self.assertFalse(whole.used_top_mask)
+        self.assertIs(image, whole.search_image)
 
     def test_rerank_by_color_prefers_same_colour_among_close_matches(self):
         beige, black = [75.0, 3.0, 15.0], [15.0, 0.0, 0.0]

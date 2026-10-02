@@ -98,11 +98,11 @@ def existing_goods_numbers(platform: str) -> set[str]:
 
 
 def up_to_date_goods_numbers(platform: str, records: list[dict]) -> set[str]:
-    """Products already indexed from the same S3 image with the current (garment) pipeline."""
+    """Products already indexed from the same S3 image with the current embedding model."""
     with connect_db() as connection:
         rows = connection.execute(
-            "SELECT goods_no, s3_key FROM products WHERE platform = %s AND color_lab IS NOT NULL",
-            (platform,),
+            "SELECT goods_no, s3_key FROM products WHERE platform = %s AND embedding_model = %s",
+            (platform, get_settings().fashion_clip_model),
         ).fetchall()
     indexed = {str(row["goods_no"]): row["s3_key"] for row in rows}
     return {
@@ -179,12 +179,11 @@ def main() -> int:
     for start in range(0, len(records), args.batch_size):
         batch = records[start:start + args.batch_size]
         images = list(pool.map(lambda record: load_image(record, settings.s3_bucket), batch))
-        # Same pipeline as the query: embed only the garment (person/background painted grey),
-        # and keep its colour and box for colour reranking and display crops.
-        prepared = [models.prepare_query(image) for image in images]
-        embeddings = models.embed([view.search_image for view in prepared])
+        # Catalog photos are person-free product shots: embed them whole, like the
+        # thumbnails yainage90 was trained on (queries are cropped to the detected top).
+        embeddings = models.embed(images)
         with connect_db() as connection:
-            for record, embedding, view in zip(batch, embeddings, prepared):
+            for record, embedding in zip(batch, embeddings):
                 product = record["product"]
                 destination = None
                 if record["source"] and not record["s3_key"]:
@@ -218,8 +217,7 @@ def main() -> int:
                     record["s3_bucket"] or settings.s3_bucket if record["s3_key"] else None,
                     record["s3_key"],
                     vector_literal(embedding.tolist()), settings.fashion_clip_model,
-                    list(view.color_lab) if view.color_lab else None,
-                    list(view.crop_box) if view.crop_box else None,
+                    None, None,  # colour/crop columns belonged to the previous model
                 ))
         indexed += len(batch)
         print(f"Indexed {indexed}/{len(records)}", flush=True)
