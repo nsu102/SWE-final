@@ -1,9 +1,29 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
+
+
+def database_url() -> str:
+    direct = os.getenv("DATABASE_URL")
+    if direct:
+        return direct
+    secret_arn = os.getenv("DATABASE_SECRET_ARN")
+    if not secret_arn:
+        return "postgresql://fashion:fashion@localhost:5432/fashion"
+    import boto3
+    secret = boto3.client("secretsmanager", region_name=os.getenv("AWS_REGION"))
+    value = json.loads(secret.get_secret_value(SecretId=secret_arn)["SecretString"])
+    user = quote(value["username"], safe="")
+    password = quote(value["password"], safe="")
+    host = os.environ["DATABASE_HOST"]
+    port = os.getenv("DATABASE_PORT", "5432")
+    name = os.getenv("DATABASE_NAME", "fashion")
+    return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
 @dataclass(frozen=True)
@@ -39,9 +59,7 @@ def get_settings() -> Settings:
         ).split(",") if value.strip()
     )
     return Settings(
-        database_url=os.getenv(
-            "DATABASE_URL", "postgresql://fashion:fashion@localhost:5432/fashion"
-        ),
+        database_url=database_url(),
         storage_root=Path(os.getenv("LOCAL_STORAGE_ROOT", "storage")).resolve(),
         fashion_clip_model=os.getenv("FASHION_CLIP_MODEL", "yainage90/fashion-image-feature-extractor"),
         human_parser_model=os.getenv("HUMAN_PARSER_MODEL", "fashn-ai/fashn-human-parser"),
