@@ -254,8 +254,10 @@ export default function LookFindApp() {
           <span>{user.display_name || user.email.split("@")[0]}</span><i>⌄</i>
         </button>
         <div className="account-popover" role="menu">
-          <span>{user.email}</span>
-          <button role="menuitem" onClick={() => void logout()}>LOGOUT</button>
+          <div className="account-popover-head"><strong>{user.display_name || user.email.split("@")[0]}</strong>{user.email && <span>{user.email}</span>}</div>
+          {/* blur so :focus-within doesn't keep the menu open after navigating */}
+          <button role="menuitem" onClick={(event) => { event.currentTarget.blur(); navigate("mypage"); }}>MY PAGE <span aria-hidden="true">↗</span></button>
+          <button role="menuitem" onClick={(event) => { event.currentTarget.blur(); void logout(); }}>LOGOUT <span aria-hidden="true">↗</span></button>
         </div>
       </div> : <button className="account" disabled={authLoading} onClick={openLogin}>{authLoading ? "LOADING…" : "LOGIN"}</button>}
     </header>

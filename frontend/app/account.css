@@ -121,9 +121,14 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-avatar-fallback { display: grid; place-items: center; font-size: 10px; font-weight: 800; }
 .account-profile > span:not(.account-avatar-fallback) { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-profile i { font-size: 13px; font-style: normal; transition: transform .2s ease; }
-.account-popover { position: absolute; z-index: 45; top: calc(100% - 9px); right: 0; display: grid; min-width: 158px; padding: 9px; border: 1px solid rgba(0,26,35,.1); border-radius: 14px; background: rgba(235,241,242,.96); box-shadow: 0 12px 25px rgba(0,26,35,.16), inset 0 1px rgba(255,255,255,.7); opacity: 0; pointer-events: none; transform: translateY(-5px); transition: opacity .18s ease, transform .18s ease; }
-.account-popover > span { padding: 6px 8px 10px; overflow: hidden; color: #527075; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.account-popover button { padding: 9px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; font-size: 10px; font-weight: 800; }
+.account-popover { position: absolute; z-index: 45; top: calc(100% - 8px); right: -6px; display: grid; gap: 2px; width: 196px; padding: 6px; border: 1px solid rgba(0,26,35,.1); border-radius: 14px; background: rgba(235,241,242,.96); box-shadow: 0 12px 25px rgba(0,26,35,.16), inset 0 1px rgba(255,255,255,.7); opacity: 0; pointer-events: none; transform: translateY(-5px); transition: opacity .18s ease, transform .18s ease; }
+.account-popover-head { display: grid; gap: 3px; margin-bottom: 4px; padding: 10px 10px 11px; border-bottom: 1px solid rgba(0,26,35,.08); }
+.account-popover-head strong, .account-popover-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-popover-head strong { font-size: 12px; }
+.account-popover-head span { color: #527075; font-size: 10px; }
+.account-popover button { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.account-popover button span { font-size: 11px; line-height: 1; transform: translateY(1.5px); opacity: .45; transition: opacity .15s ease; }
+.account-popover button:hover span, .account-popover button:focus-visible span { opacity: 1; }
 .account-popover button:hover, .account-popover button:focus-visible { background: var(--mint); outline: none; }
 .account-menu:hover .account-popover, .account-menu:focus-within .account-popover { opacity: 1; pointer-events: auto; transform: translateY(0); }
 .account-menu:hover .account-profile i, .account-menu:focus-within .account-profile i { transform: rotate(180deg); }
@@ -141,7 +146,9 @@ button:disabled { cursor: wait; opacity: .55; }
   box-shadow: 9px 12px 22px rgba(0, 26, 35, .14), -4px -4px 10px rgba(255, 255, 255, .72), inset 1px 1px 1px rgba(255, 255, 255, .9);
   transition: transform .25s ease, box-shadow .25s ease;
 }
-.my-profile-avatar { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--mint); font-size: 26px; }
+.my-profile-avatar { display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 50%; background: var(--mint); font-size: 26px; }
+.my-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.my-profile dd + dt { margin-top: 18px; }
 .my-profile h2 { margin: 24px 0; font-size: 22px; }
 .my-profile dl { margin: 0 0 36px; }
 .my-profile dt { font-size: 10px; letter-spacing: 1px; color: #527075; }

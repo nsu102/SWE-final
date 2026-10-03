@@ -15,9 +15,9 @@ export default function MyPage({ user, busy, onHistory, onSaved, onLogout }: MyP
     <div className="my-page-heading"><h1>MY PAGE</h1></div>
     <div className="my-page-layout">
       <section className="my-profile" aria-labelledby="my-profile-title">
-        <div className="my-profile-avatar" aria-hidden="true">{user.email.charAt(0).toUpperCase()}</div>
+        <div className="my-profile-avatar" aria-hidden="true">{user.avatar_url ? <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" /> : (user.display_name || user.email).charAt(0).toUpperCase()}</div>
         <h2 id="my-profile-title">내 계정</h2>
-        <dl><dt>EMAIL</dt><dd>{user.email}</dd></dl>
+        <dl>{user.display_name && <><dt>NAME</dt><dd>{user.display_name}</dd></>}{user.email && <><dt>EMAIL</dt><dd>{user.email}</dd></>}</dl>
         <button className="photo-action" disabled={busy} onClick={onLogout}>{busy ? "처리 중…" : "LOGOUT"}<span aria-hidden="true">↗</span></button>
       </section>
       <div className="my-page-links">
