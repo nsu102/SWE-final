@@ -5,6 +5,9 @@ Parameters:
   SubnetIds: {Type: List<AWS::EC2::Subnet::Id>}
   VpcId: {Type: AWS::EC2::VPC::Id}
   ProductBucketName: {Type: String, Default: software2026}
+  KakaoRestApiKey: {Type: String, NoEcho: true}
+  KakaoClientSecret: {Type: String, NoEcho: true, Default: ""}
+  KakaoRedirectUri: {Type: String, Default: https://lookfind.site/api/auth/kakao/callback}
 Resources:
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -94,10 +97,15 @@ Resources:
           LOCAL_STORAGE_ROOT: /tmp/storage
           FRONTEND_URL: https://lookfind.site
           CORS_ORIGINS: https://lookfind.site
+          KAKAO_REST_API_KEY: !Ref KakaoRestApiKey
+          KAKAO_CLIENT_SECRET: !Ref KakaoClientSecret
+          KAKAO_REDIRECT_URI: !Ref KakaoRedirectUri
           MAX_UPLOAD_MB: "4"
           FASHION_CLIP_MODEL: yainage90/fashion-image-feature-extractor
           OMP_NUM_THREADS: "2"
           TOKENIZERS_PARALLELISM: "false"
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties: {Name: lookfind-api, ProtocolType: HTTP}
