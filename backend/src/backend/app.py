@@ -395,11 +395,6 @@ KAKAO_STATE_COOKIE = "lookfind_kakao_state"
 KAKAO_COOKIE_PATH = "/api/auth/kakao"
 
 
-def kakao_redirect_uri() -> str:
-    # Register this exact URI in Kakao Developers (the frontend proxies it to the backend).
-    return f"{settings.frontend_url}/api/auth/kakao/callback"
-
-
 def kakao_failed() -> RedirectResponse:
     response = RedirectResponse(f"{settings.frontend_url}/?login_error=kakao", status_code=302)
     response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_COOKIE_PATH)
@@ -408,12 +403,12 @@ def kakao_failed() -> RedirectResponse:
 
 @app.get("/api/auth/kakao")
 def kakao_start() -> RedirectResponse:
-    if not settings.kakao_client_id:
-        logger.warning("KAKAO_CLIENT_ID is not set; Kakao login is disabled.")
+    if not settings.kakao_rest_api_key:
+        logger.warning("KAKAO_REST_API_KEY is not set; Kakao login is disabled.")
         return kakao_failed()
     state = secrets.token_urlsafe(24)
     query = urlencode({
-        "client_id": settings.kakao_client_id, "redirect_uri": kakao_redirect_uri(),
+        "client_id": settings.kakao_rest_api_key, "redirect_uri": settings.kakao_redirect_uri,
         "response_type": "code", "state": state,
     })
     response = RedirectResponse(f"https://kauth.kakao.com/oauth/authorize?{query}", status_code=302)
@@ -432,8 +427,8 @@ def kakao_callback(
         return kakao_failed()
     try:
         token = httpx.post("https://kauth.kakao.com/oauth/token", timeout=10, data={
-            "grant_type": "authorization_code", "client_id": settings.kakao_client_id,
-            "redirect_uri": kakao_redirect_uri(), "code": code,
+            "grant_type": "authorization_code", "client_id": settings.kakao_rest_api_key,
+            "redirect_uri": settings.kakao_redirect_uri, "code": code,
             **({"client_secret": settings.kakao_client_secret} if settings.kakao_client_secret else {}),
         }).raise_for_status().json()["access_token"]
         profile = httpx.get("https://kapi.kakao.com/v2/user/me", timeout=10,

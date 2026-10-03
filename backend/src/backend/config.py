@@ -26,8 +26,9 @@ class Settings:
     mail_from: str
     color_weight: float
     cookie_secure: bool
-    kakao_client_id: str | None
+    kakao_rest_api_key: str | None
     kakao_client_secret: str | None
+    kakao_redirect_uri: str
 
 
 @lru_cache
@@ -60,6 +61,9 @@ def get_settings() -> Settings:
         color_weight=float(os.getenv("COLOR_WEIGHT", "0.15")),
         # The browser reaches the API through the frontend origin (Next.js proxy), so cookies follow its scheme.
         cookie_secure=os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://"),
-        kakao_client_id=os.getenv("KAKAO_CLIENT_ID") or None,
+        kakao_rest_api_key=os.getenv("KAKAO_REST_API_KEY") or None,
         kakao_client_secret=os.getenv("KAKAO_CLIENT_SECRET") or None,
+        # Must match a Redirect URI registered in Kakao Developers; the frontend proxies it to the backend.
+        kakao_redirect_uri=os.getenv("KAKAO_REDIRECT_URI")
+        or os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/") + "/api/auth/kakao/callback",
     )
