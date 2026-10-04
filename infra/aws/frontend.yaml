@@ -19,6 +19,22 @@ Resources:
       PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
       OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
       VersioningConfiguration: {Status: Enabled}
+  # Static export emits /archive.html etc.; S3 has no directory index, so map clean URLs to those files.
+  RouteRewrite:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: lookfind-route-rewrite
+      AutoPublish: true
+      FunctionConfig: {Comment: "/archive -> /archive.html", Runtime: cloudfront-js-2.0}
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          if (uri === '/') return request;
+          if (uri.endsWith('/')) uri = uri.slice(0, -1);
+          if (uri.lastIndexOf('.') < uri.lastIndexOf('/') + 1) request.uri = uri + '.html';
+          return request;
+        }
   Oac:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -45,6 +61,11 @@ Resources:
           AllowedMethods: [GET, HEAD, OPTIONS]
           CachedMethods: [GET, HEAD, OPTIONS]
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations: [{EventType: viewer-request, FunctionARN: !GetAtt RouteRewrite.FunctionARN}]
+        # A missing S3 key comes back as 403 through OAC; show the exported 404 page instead.
+        CustomErrorResponses:
+          - {ErrorCode: 403, ResponseCode: 404, ResponsePagePath: /404.html, ErrorCachingMinTTL: 10}
+          - {ErrorCode: 404, ResponseCode: 404, ResponsePagePath: /404.html, ErrorCachingMinTTL: 10}
         CacheBehaviors:
           -
             PathPattern: api/*

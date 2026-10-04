@@ -8,6 +8,7 @@ Parameters:
   KakaoRestApiKey: {Type: String, NoEcho: true}
   KakaoClientSecret: {Type: String, NoEcho: true, Default: ""}
   KakaoRedirectUri: {Type: String, Default: https://lookfind.site/api/auth/kakao/callback}
+  JwtSecret: {Type: String, NoEcho: true, MinLength: 32, Description: HS256 key for access/refresh tokens}
 Resources:
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -100,6 +101,7 @@ Resources:
           KAKAO_REST_API_KEY: !Ref KakaoRestApiKey
           KAKAO_CLIENT_SECRET: !Ref KakaoClientSecret
           KAKAO_REDIRECT_URI: !Ref KakaoRedirectUri
+          JWT_SECRET: !Ref JwtSecret
           MAX_UPLOAD_MB: "4"
           FASHION_CLIP_MODEL: yainage90/fashion-image-feature-extractor
           OMP_NUM_THREADS: "2"
