@@ -114,7 +114,7 @@ button:disabled { cursor: wait; opacity: .55; }
 
 
 .site-header > nav { min-width: 0; overflow-x: auto; white-space: nowrap; }
-.site-header > nav > button { flex-shrink: 0; }
+.site-header > nav > a { flex-shrink: 0; }
 .account-menu { position: relative; margin-left: auto; align-self: stretch; display: flex; align-items: center; }
 .account-profile { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .account-profile img, .account-avatar-fallback { width: 27px; height: 27px; flex: 0 0 27px; border-radius: 50%; object-fit: cover; background: var(--mint); box-shadow: inset 0 1px 1px rgba(255,255,255,.56), 0 2px 7px rgba(0,26,35,.13); }
@@ -126,10 +126,10 @@ button:disabled { cursor: wait; opacity: .55; }
 .account-popover-head strong, .account-popover-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-popover-head strong { font-size: 12px; }
 .account-popover-head span { color: #527075; font-size: 10px; }
-.account-popover button { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
-.account-popover button span { font-size: 11px; line-height: 1; transform: translateY(-.5px); opacity: .45; transition: opacity .15s ease, transform .18s ease; }
-.account-popover button:hover span, .account-popover button:focus-visible span { opacity: 1; transform: translate(1px, -2.5px) scale(1.3); }
-.account-popover button:hover, .account-popover button:focus-visible { background: var(--mint); outline: none; }
+.account-popover :is(a,button) { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.account-popover :is(a,button) span { font-size: 11px; line-height: 1; transform: translateY(-.5px); opacity: .45; transition: opacity .15s ease, transform .18s ease; }
+.account-popover :is(a,button):hover span, .account-popover :is(a,button):focus-visible span { opacity: 1; transform: translate(1px, -2.5px) scale(1.3); }
+.account-popover :is(a,button):hover, .account-popover :is(a,button):focus-visible { background: var(--mint); outline: none; }
 .account-menu:hover .account-popover, .account-menu:focus-within .account-popover { opacity: 1; pointer-events: auto; transform: translateY(0); }
 .account-menu:hover .account-profile i, .account-menu:focus-within .account-profile i { transform: rotate(180deg); }
 .my-page { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 64px 0 80px; }
@@ -181,3 +181,7 @@ button:disabled { cursor: wait; opacity: .55; }
   .my-profile { padding: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { .my-profile, .my-page-link { transition: none; } .my-profile:hover, .my-page-link:hover { transform: none; } }
+
+/* Route links styled like the former buttons */
+.wordmark, nav a, .account-popover a { text-decoration: none; color: var(--ink); }
+nav a { display: flex; align-items: center; }

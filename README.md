@@ -13,7 +13,7 @@ frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 유사 상품 결�
     │                                                                  ▲
     └──이미지──▶ [S3] ◀──presigned URL── [FastAPI /api/search] ─────────┘
                                                 ▲
-                                   [Next.js frontend] (/api·/media 프록시, HttpOnly 세션 쿠키)
+                                   [Next.js frontend] (/api·/media 프록시, JWT access/refresh HttpOnly 쿠키)
 ```
 
 ## 빠른 시작

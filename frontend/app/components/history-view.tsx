@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ApiError, deleteHistory, errorMessage, getHistory, getHistoryDetail, restoreHistory } from "../apis/backend";
-import type { HistoryDetail, HistoryItem } from "../types/api";
+import { useEffect, useState } from "react";
+import { deleteHistory, getHistory, restoreHistory } from "../apis/history";
+import { HISTORY_RESTORE_CHUNK } from "../constants/look-find";
+import { errorMessage, isUnauthorized } from "../utils/error";
+import ArchiveCard from "./archive-card";
+import type { HistoryItem } from "../types/api";
 
-export default function HistoryView({ onOpen, onLogin }: { onOpen: (result: HistoryDetail) => void; onLogin: () => void }) {
-  const active = useRef(true);
-  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+export default function HistoryView({ onOpen, onLogin }: { onOpen: (id: string) => void; onLogin: () => void }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const [undo, setUndo] = useState<string[]>([]);
@@ -18,14 +19,14 @@ export default function HistoryView({ onOpen, onLogin }: { onOpen: (result: Hist
     const controller = new AbortController();
     getHistory(undefined, controller.signal).then(data => { setItems(data.items); setCursor(data.next_cursor); setBusy(false); }).catch(error => {
       if (controller.signal.aborted) return;
-      setError(errorMessage(error)); setExpired(error instanceof ApiError && error.status === 401); setBusy(false);
+      setError(errorMessage(error)); setExpired(isUnauthorized(error)); setBusy(false);
     });
     return () => controller.abort();
   }, [revision]);
   async function act(action: () => Promise<void>) {
     if (busy) return;
     setBusy(true); setError("");
-    try { await action(); } catch (error) { setError(errorMessage(error)); setExpired(error instanceof ApiError && error.status === 401); }
+    try { await action(); } catch (error) { setError(errorMessage(error)); setExpired(isUnauthorized(error)); }
     finally { setBusy(false); }
   }
   async function remove(id?: string) {
@@ -37,7 +38,7 @@ export default function HistoryView({ onOpen, onLogin }: { onOpen: (result: Hist
     <div className="collection-heading"><h1>ARCHIVE</h1><div className="collection-actions">
       <button className="collection-action" disabled={busy || !items.length} onClick={() => void act(() => remove())}>CLEAR ALL ↗</button>
       <button className="collection-return" disabled={busy || !undo.length} onClick={() => void act(async () => {
-        for (let start = 0; start < undo.length; start += 1000) await restoreHistory(undo.slice(start, start + 1000));
+        for (let start = 0; start < undo.length; start += HISTORY_RESTORE_CHUNK) await restoreHistory(undo.slice(start, start + HISTORY_RESTORE_CHUNK));
         setUndo([]); const page = await getHistory(); setItems(page.items); setCursor(page.next_cursor);
       })}>RETURN ↶</button>
     </div></div>
@@ -45,12 +46,7 @@ export default function HistoryView({ onOpen, onLogin }: { onOpen: (result: Hist
     {error && <div className="api-error" role="alert">{error} <button className="inline-action" onClick={expired ? onLogin : () => { setError(""); setBusy(true); setRevision(value => value + 1); }}>{expired ? "로그인" : "다시 시도"}</button></div>}
     {busy && <p role="status">기록을 불러오고 있습니다…</p>}
     {!busy && !items.length && !error && <p className="collection-empty">저장된 검색 이력이 없습니다. 사진을 검색하면 여기에 저장됩니다.</p>}
-    <div className="archive-grid">{items.map(item => <article className="archive-card real-archive-card" key={item.id}>
-      <button className="archive-open" disabled={busy} onClick={() => void act(async () => { const result = await getHistoryDetail(item.id); if (active.current) onOpen(result); })}>
-        <div className="real-archive-image">{item.image_url && <img src={item.image_url} alt={item.label} />}</div>
-        <div className="archive-info"><h2>{item.label}</h2><p>{new Date(item.searched_at).toLocaleString("ko-KR")}</p><strong>{item.count} MATCHES</strong></div>
-      </button><button className="archive-remove" aria-label={`${item.label} 삭제`} disabled={busy} onClick={() => void act(() => remove(item.id))}>×</button>
-    </article>)}</div>
+    <div className="archive-grid">{items.map(item => <ArchiveCard key={item.id} item={item} busy={busy} onOpen={onOpen} onRemove={id => void act(() => remove(id))} />)}</div>
     {cursor && <button className="inline-action load-more" disabled={busy} onClick={() => void act(async () => {
       const page = await getHistory(cursor); setItems(current => [...current, ...page.items]); setCursor(page.next_cursor);
     })}>더 보기 ↓</button>}

@@ -1,5 +1,5 @@
-import LookFindApp from "./components/look-find-app";
+import HomeHero from "./components/home-hero";
 
-export default function Home() {
-  return <LookFindApp />;
+export default function HomePage() {
+  return <HomeHero />;
 }

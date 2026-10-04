@@ -1,0 +1,61 @@
+/* Mobile / tablet overrides. Loaded last so it wins over the page stylesheets. */
+:root { --header-h: 68px; }
+/* Korean wraps between words, not mid-word. */
+body { word-break: keep-all; }
+.wordmark { white-space: nowrap; }
+
+@media (max-width: 800px) {
+  :root { --header-h: 100px; }
+
+  /* Header: wordmark + account on the first row, the full nav on a second row */
+  .site-header { flex-wrap: wrap; height: var(--header-h); gap: 0; padding: 0 16px; align-content: stretch; }
+  .site-header .wordmark { order: 1; height: 54px; display: flex; align-items: center; font-size: 18px; }
+  .site-header .account, .site-header .account-menu { order: 2; margin-left: auto; height: 54px; }
+  .site-header > nav { order: 3; flex: 0 0 100%; height: 46px; gap: 0; justify-content: space-between; border-top: 1px solid var(--line); }
+  .site-header > nav > a { font-size: 11px; padding: 0 2px; }
+  .account-profile > span:not(.account-avatar-fallback) { max-width: 120px; }
+  .account-popover { top: calc(100% - 4px); }
+  .upload-mode, .login-curtain { inset: var(--header-h) 0 0; }
+
+  /* Home: wordmark fits the screen; the photo sits below the copy. The TOP/PANTS/BOOTS callouts are
+     positioned for the desktop composition, so they are hidden here. */
+  .hero { display: flex; flex-direction: column; min-height: calc(100svh - var(--header-h)); padding: 0 16px; }
+  .hero-copy { padding-top: 7vh; height: auto; }
+  .hero-copy h1 { font-size: 19vw; letter-spacing: -.08em; }
+  .hero-copy p { margin: 22px 0 20px; font-size: 13px; }
+  .hero-image { position: relative; right: auto; bottom: auto; width: 100%; height: auto; flex: 1; min-height: 300px; opacity: 1; }
+  .hero-image img { transform: scale(1.7); transform-origin: center bottom; object-position: center bottom; }
+  .analysis-layer { display: none; }
+
+  /* Results: compact photo row; the filter capsule keeps its desktop-relative indicator math */
+  .test-search { padding: 28px 16px 48px; }
+  .test-heading { margin-bottom: 20px; }
+  .test-heading h1 { font-size: clamp(40px, 13vw, 64px); }
+  .test-controls > .test-control-label:first-child { display: none; }
+  .source-filter { flex: 0 0 auto; }
+  .test-layout { gap: 22px; padding-top: 16px; }
+  .uploaded-column { display: grid; grid-template-columns: 104px 1fr; gap: 14px; align-items: end; max-width: none; }
+  .uploaded-photo { width: 104px; max-height: none; }
+  .match-grid { gap: 12px; padding: 0 0 8px; margin-top: 0; }
+
+  /* Collections, My Page, login */
+  .collection-page { padding-left: 16px; padding-right: 16px; }
+  .collection-heading { flex-wrap: wrap; gap: 14px; }
+  .collection-heading h1 { font-size: clamp(40px, 13vw, 64px); }
+  .my-page { width: calc(100% - 32px); }
+  .login-page { grid-template-columns: 1fr; padding: 28px 16px 40px; gap: 18px; }
+  .login-intro h1 { font-size: clamp(48px, 16vw, 80px); }
+  .login-panel { width: 100%; }
+  .page-status { padding: 40px 16px; }
+}
+
+@media (max-width: 360px) {
+  .site-header > nav > a { font-size: 10px; }
+  .source-filter { width: 100%; min-width: 0; }
+}
+
+@media (min-width: 560px) and (max-width: 800px) {
+  .match-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.retry-search { margin-top: 10px; }

@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { errorMessage, requestPasswordReset, resetPassword, signIn, signUp } from "../apis/backend";
+import { requestPasswordReset, resetPassword, signIn, signUp } from "../apis/auth";
+import { errorMessage } from "../utils/error";
 import type { User } from "../types/api";
 
 type Mode = "login" | "register" | "forgot" | "reset";

@@ -13,7 +13,7 @@ npm install
 npm run dev                  # http://localhost:3000
 ```
 
-`next.config.ts`가 `/api/*`, `/media/*`를 `BACKEND_URL`로 전달하므로 브라우저는 같은 출처로만 호출하고, 로그인 세션은 HttpOnly 쿠키(`lookfind_session`)로 유지됩니다. CORS 설정이 필요 없고 토큰이 JavaScript에 노출되지 않습니다.
+`next.config.ts`가 `/api/*`, `/media/*`를 `BACKEND_URL`로 전달하므로 브라우저는 같은 출처로만 호출하고, 로그인은 JWT access/refresh token을 HttpOnly 쿠키로 유지합니다. CORS 설정이 필요 없고 토큰이 JavaScript에 노출되지 않습니다. `app/apis/http.ts`가 401이면 refresh 후 한 번 재전송하고, 네트워크 오류·502/503/504는 멱등 요청(GET/PUT/DELETE)만 백오프 재시도합니다.
 
 - LOGIN → SIGN UP에서 이메일과 8~128자 비밀번호로 가입하면 자동 로그인됩니다. KAKAO로 계속하기는 백엔드 `KAKAO_REST_API_KEY`가 설정돼 있어야 합니다.
 - 로그인 상태에서 완료된 검색만 ARCHIVE에 저장됩니다. 개별/전체 삭제 후 10분 안에 RETURN으로 복원할 수 있습니다.
