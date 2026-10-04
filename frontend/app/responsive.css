@@ -61,3 +61,12 @@ body { word-break: keep-all; }
 
 /* The notice floats under the header instead of pushing full-height pages past the viewport. */
 .connection-notice { position: fixed; z-index: 35; top: var(--header-h); left: 0; right: 0; box-shadow: 0 6px 14px rgba(0, 26, 35, .08); }
+
+/* Desktop results page is exactly one screen tall: the layout row takes only the space left under
+   the heading/controls, and the uploaded photo (3:4) shrinks to that height instead of pushing the
+   product grid past the bottom edge. */
+@media (min-width: 801px) {
+  .test-layout { display: grid; grid-template-rows: minmax(0, 1fr); }
+  .uploaded-column { display: flex; flex-direction: column; align-self: stretch; min-height: 0; gap: 12px; }
+  .uploaded-photo { flex: 0 1 auto; align-self: flex-start; width: auto; height: 100%; max-width: 100%; min-height: 0; }
+}
