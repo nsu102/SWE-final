@@ -1,5 +1,4 @@
 /* Mobile / tablet overrides. Loaded last so it wins over the page stylesheets. */
-:root { --header-h: 68px; }
 /* Korean wraps between words, not mid-word. */
 body { word-break: keep-all; }
 .wordmark { white-space: nowrap; }
@@ -15,15 +14,15 @@ body { word-break: keep-all; }
   .site-header > nav > a { font-size: 11px; padding: 0 2px; }
   .account-profile > span:not(.account-avatar-fallback) { max-width: 120px; }
   .account-popover { top: calc(100% - 4px); }
-  .upload-mode, .login-curtain { inset: var(--header-h) 0 0; }
 
   /* Home: wordmark fits the screen; the photo sits below the copy. The TOP/PANTS/BOOTS callouts are
      positioned for the desktop composition, so they are hidden here. */
-  .hero { display: flex; flex-direction: column; min-height: calc(100svh - var(--header-h)); padding: 0 16px; }
-  .hero-copy { padding-top: 7vh; height: auto; }
+  /* Exactly one screen under the header; only very short screens (< 520px) scroll. */
+  .hero { display: flex; flex-direction: column; height: calc(100svh - var(--header-h)); min-height: 520px; padding: 0 16px; }
+  .hero-copy { padding-top: 5vh; height: auto; flex: none; }
   .hero-copy h1 { font-size: 19vw; letter-spacing: -.08em; }
   .hero-copy p { margin: 22px 0 20px; font-size: 13px; }
-  .hero-image { position: relative; right: auto; bottom: auto; width: 100%; height: auto; flex: 1; min-height: 300px; opacity: 1; }
+  .hero-image { position: relative; right: auto; bottom: auto; width: 100%; height: auto; flex: 1 1 0; min-height: 140px; opacity: 1; }
   .hero-image img { transform: scale(1.7); transform-origin: center bottom; object-position: center bottom; }
   .analysis-layer { display: none; }
 
@@ -59,3 +58,6 @@ body { word-break: keep-all; }
 }
 
 .retry-search { margin-top: 10px; }
+
+/* The notice floats under the header instead of pushing full-height pages past the viewport. */
+.connection-notice { position: fixed; z-index: 35; top: var(--header-h); left: 0; right: 0; box-shadow: 0 6px 14px rgba(0, 26, 35, .08); }

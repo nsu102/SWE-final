@@ -61,7 +61,7 @@
 .test-search {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 68px);
+  height: calc(100dvh - var(--header-h));
   min-height: 0;
   padding-bottom: 28px;
   overflow: hidden;
@@ -220,7 +220,7 @@
 .filter-indicator.at-3 { transform: translateX(352.5px); }
 
 @media (max-width: 800px) {
-  .test-search { display: block; height: auto; min-height: calc(100vh - 68px); padding-bottom: 60px; overflow: visible; }
+  .test-search { display: block; height: auto; min-height: calc(100svh - var(--header-h)); padding-bottom: 60px; overflow: visible; }
   .test-controls { grid-template-columns: 1fr; gap: 14px; padding: 0 0 18px; border: 0; }
   .matches-controls { align-items: flex-start; flex-direction: column; gap: 10px; margin-right: 0; }
   .test-layout, .matches-column, .match-grid { height: auto; gap: 35px; margin-right: 0; overflow: visible; }

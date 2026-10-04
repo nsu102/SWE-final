@@ -1,6 +1,6 @@
 /* Archive and saved-item pages share the LookFind result-card language. */
 .collection-page {
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - var(--header-h));
   padding: 54px 5vw 72px;
   background: var(--paper);
 }
@@ -203,7 +203,7 @@
 .login-page {
   display: grid;
   grid-template-columns: 1.1fr .9fr;
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - var(--header-h));
   padding: 8vh 9vw;
   gap: clamp(42px, 10vw, 180px);
   background: var(--paper);

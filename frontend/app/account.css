@@ -49,7 +49,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .login-curtain {
   position: fixed;
   z-index: 40;
-  inset: 68px 0 0;
+  inset: var(--header-h) 0 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--paper);
