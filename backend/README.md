@@ -71,7 +71,15 @@ work/.venv/bin/uvicorn src.backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 ### 회원·검색 기록·찜 API
 
-로그인하면 HttpOnly 쿠키 `lookfind_session`(SameSite=Lax, `FRONTEND_URL`이 https면 Secure)이 설정됩니다. 브라우저는 프런트엔드의 Next.js 프록시(`/api/*`, `/media/*`)를 통해 같은 출처로 호출하므로 CORS·토큰 저장이 필요 없습니다. 비밀번호는 표준 라이브러리 scrypt 해시로, 세션은 토큰의 SHA-256만 `sessions` 테이블에 저장합니다(30일 만료). 만료된 쿠키로 검색하면 비로그인 검색으로 처리됩니다. 같은 이메일+IP로 비밀번호를 5번 틀리면 10분간 429로 막히고(IP당 30회), 재설정 요청은 IP당 시간당 5회입니다. 카운터는 프로세스 메모리에 있어 워커 1개 기준이며, 배포 nginx에도 `/api/auth/` 분당 10회 제한이 있습니다. 재설정 메일은 `SMTP_*` 환경변수로 보내고, `SMTP_HOST`가 비어 있으면 링크를 백엔드 로그(WARNING)에 출력합니다.
+인증은 **JWT access token + refresh token** 방식입니다(`src/backend/tokens.py`, HS256, `JWT_SECRET`).
+
+- **access token**: 15분, `lookfind_access` HttpOnly 쿠키(Path=/api). 서명·만료만 검사하는 stateless 토큰입니다.
+- **refresh token**: 30일, `lookfind_refresh` HttpOnly 쿠키(Path=/api/auth). JWT의 `jti`를 `refresh_tokens` 테이블에 저장해 폐기할 수 있습니다.
+- `POST /api/auth/refresh`는 refresh token을 **회전**(기존 jti 폐기 + 같은 family로 새 토큰)합니다. 이미 회전된 토큰이 30초 이후 다시 쓰이면 탈취로 보고 그 family(해당 로그인) 전체를 폐기합니다. 30초 안의 재사용은 여러 탭의 동시 refresh로 보고 거부만 합니다.
+- 쿠키는 SameSite=Strict, `FRONTEND_URL`이 https면 Secure. 토큰은 JavaScript에 노출되지 않습니다.
+- 만료/위조된 access token은 401이고, 프런트(`app/apis/http.ts`)가 refresh 후 원래 요청을 한 번 재전송합니다. 로그아웃은 해당 family만, 비밀번호 재설정은 그 사용자의 모든 refresh token을 폐기합니다.
+
+비밀번호는 표준 라이브러리 scrypt 해시로 저장합니다. 같은 이메일+IP로 비밀번호를 5번 틀리면 10분간 429로 막히고(IP당 30회), 재설정 요청은 IP당 시간당 5회입니다. 카운터는 프로세스 메모리에 있어 워커 1개 기준이며, 배포 nginx에도 `/api/auth/` 분당 10회 제한이 있습니다. 재설정 메일은 `SMTP_*` 환경변수로 보내고, `SMTP_HOST`가 비어 있으면 링크를 백엔드 로그(WARNING)에 출력합니다.
 
 카카오 로그인은 `KAKAO_REST_API_KEY`(필요하면 `KAKAO_CLIENT_SECRET`)를 설정하고 Kakao Developers에 Redirect URI `KAKAO_REDIRECT_URI`(기본 `{FRONTEND_URL}/api/auth/kakao/callback`)를 등록합니다. 카카오 계정은 `users.kakao_id`로 구분하고 닉네임·프로필 사진을 저장합니다. 카카오가 검증한 이메일이 기존 이메일 계정과 같으면 그 계정에 연결합니다.
 
@@ -79,11 +87,12 @@ work/.venv/bin/uvicorn src.backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| POST | `/api/auth/register`, `/api/auth/login` | `{email, password}` → 세션 쿠키 + `{id, email, display_name, avatar_url}` |
+| POST | `/api/auth/register`, `/api/auth/login` | `{email, password}` → access/refresh 쿠키 + `{id, email, display_name, avatar_url}` |
+| POST | `/api/auth/refresh` | refresh token 회전 + 새 access token (실패 시 401, 쿠키 삭제) |
 | GET | `/api/auth/kakao`, `/api/auth/kakao/callback` | 카카오 OAuth 시작 / 콜백 (성공 시 쿠키 설정 후 프런트로, 실패 시 `/?login_error=kakao`) |
-| POST | `/api/auth/logout` | 세션 삭제, 쿠키 제거 |
+| POST | `/api/auth/logout` | 이 로그인의 refresh token family 폐기, 쿠키 제거 |
 | POST | `/api/auth/reset-request` | `{email}` → 재설정 링크 발송 (가입 여부와 무관하게 항상 204) |
-| POST | `/api/auth/reset` | `{token, password}` → 비밀번호 변경, 기존 세션 전부 로그아웃, 새 세션 쿠키 발급 |
+| POST | `/api/auth/reset` | `{token, password}` → 비밀번호 변경, 모든 refresh token 폐기, 새 토큰 발급 |
 | GET | `/api/auth/me` | 현재 계정 |
 | GET | `/api/history?before={cursor}` | 검색 기록 24개씩 `{items, next_cursor}` |
 | GET | `/api/history/{id}` | 해당 검색 기록 + 결과 상품 |
@@ -148,10 +157,11 @@ Nginx는 외부 요청을 API 컨테이너로 전달하고, API 컨테이너는 
 | `AWS_REGION` | S3 리전 |
 | `LOCAL_STORAGE_ROOT` | 로컬 상품 이미지 루트 |
 | `CORS_ORIGINS` | 브라우저가 백엔드를 직접 호출할 때만 필요한 origin 목록 (Next.js 프록시 사용 시 불필요) |
+| `JWT_SECRET` | JWT 서명 키(32자 이상). https 배포에서는 필수, 로컬 http에서는 없으면 임시 키 사용 |
 | `FRONTEND_URL` | 프런트엔드 주소 (재설정 메일 링크, 카카오 Redirect URI, 쿠키 Secure 여부) |
 | `KAKAO_REST_API_KEY`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI` | 카카오 로그인 REST API 키 / Client Secret(선택) / Redirect URI(선택) |
 | `MAX_UPLOAD_MB` | 검색 사진 최대 크기 |
 
-`AUTO_MIGRATE=false`인 운영 DB에는 배포 후 `python -m src.backend.migrate`로 새 테이블(`users`, `sessions`, `password_resets`, `search_results`, `favorites`)을 만듭니다.
+`AUTO_MIGRATE=false`인 운영 DB에는 배포 후 `python -m src.backend.migrate`로 새 테이블(`users`, `refresh_tokens`, `password_resets`, `search_results`, `favorites`)을 만듭니다.
 
 실제 `.env`, 인증서, 모델 캐시, 로컬 저장 이미지는 Git에 포함되지 않습니다.

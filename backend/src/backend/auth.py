@@ -1,4 +1,4 @@
-"""Email/password and Kakao accounts with opaque session tokens in an HttpOnly cookie (stdlib scrypt)."""
+"""Accounts: scrypt passwords, login rate limits, reset mails, Kakao profiles and the JWT auth dependencies."""
 from __future__ import annotations
 
 import hashlib
@@ -12,15 +12,14 @@ import time
 from collections import defaultdict, deque
 from email.message import EmailMessage
 
-from fastapi import Cookie, HTTPException, Response
+from fastapi import Cookie, HTTPException
 
 from src.backend.config import get_settings
 from src.backend.db import connect_db
+from src.backend.tokens import ACCESS_COOKIE, TokenError, user_from_access
 
 logger = logging.getLogger("uvicorn.error")
 
-SESSION_DAYS = 30
-SESSION_COOKIE = "lookfind_session"
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
@@ -40,39 +39,22 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_session(user_id: int) -> str:
-    token = secrets.token_urlsafe(32)
-    with connect_db() as connection:
-        connection.execute(
-            "INSERT INTO sessions (token_hash, user_id, expires_at) "
-            "VALUES (%s, %s, now() + make_interval(days => %s))",
-            (token_hash(token), user_id, SESSION_DAYS),
-        )
-    return token
+def optional_user(access: str | None = Cookie(None, alias=ACCESS_COOKIE)) -> int | None:
+    """User id from the access-token cookie; None when anonymous.
 
-
-def set_session_cookie(response: Response, user_id: int) -> None:
-    response.set_cookie(
-        SESSION_COOKIE, create_session(user_id), max_age=SESSION_DAYS * 86400,
-        httponly=True, samesite="lax", secure=get_settings().cookie_secure, path="/",
-    )
-
-
-def optional_user(session: str | None = Cookie(None, alias=SESSION_COOKIE)) -> int | None:
-    # An expired/unknown cookie means "anonymous": the browser can't drop an HttpOnly cookie itself,
-    # so failing here would break anonymous search until the user logs out.
-    if not session:
+    An expired or invalid token is a 401 (not anonymous), so the client refreshes and retries
+    instead of silently running e.g. a search that is not saved to the user's ARCHIVE.
+    """
+    if not access:
         return None
-    with connect_db() as connection:
-        row = connection.execute(
-            "SELECT user_id FROM sessions WHERE token_hash = %s AND expires_at > now()",
-            (token_hash(session),),
-        ).fetchone()
-    return int(row["user_id"]) if row else None
+    try:
+        return user_from_access(access)
+    except TokenError as exc:
+        raise HTTPException(status_code=401, detail="access token expired") from exc
 
 
-def require_user(session: str | None = Cookie(None, alias=SESSION_COOKIE)) -> int:
-    user_id = optional_user(session)
+def require_user(access: str | None = Cookie(None, alias=ACCESS_COOKIE)) -> int:
+    user_id = optional_user(access)
     if user_id is None:
         raise HTTPException(status_code=401, detail="로그인이 필요해요.")
     return user_id

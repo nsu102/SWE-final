@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import os
 import json
+import logging
+import os
+import secrets
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -24,6 +26,19 @@ def database_url() -> str:
     port = os.getenv("DATABASE_PORT", "5432")
     name = os.getenv("DATABASE_NAME", "fashion")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+
+
+def jwt_secret(secure: bool) -> str:
+    """HS256 signing key. Required in production; a throwaway key is fine for local http dev."""
+    secret = os.getenv("JWT_SECRET")
+    if secret:
+        if len(secret) < 32:
+            raise RuntimeError("JWT_SECRET must be at least 32 characters")
+        return secret
+    if secure:
+        raise RuntimeError("JWT_SECRET is required when FRONTEND_URL is https")
+    logging.getLogger("uvicorn.error").warning("JWT_SECRET is not set; using a random key (logins reset on restart).")
+    return secrets.token_urlsafe(48)
 
 
 @dataclass(frozen=True)
@@ -49,6 +64,7 @@ class Settings:
     kakao_rest_api_key: str | None
     kakao_client_secret: str | None
     kakao_redirect_uri: str
+    jwt_secret: str
 
 
 @lru_cache
@@ -84,4 +100,5 @@ def get_settings() -> Settings:
         # Must match a Redirect URI registered in Kakao Developers; the frontend proxies it to the backend.
         kakao_redirect_uri=os.getenv("KAKAO_REDIRECT_URI")
         or os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/") + "/api/auth/kakao/callback",
+        jwt_secret=jwt_secret(os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://")),
     )

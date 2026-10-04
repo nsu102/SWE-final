@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS search_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Accounts. Passwords are scrypt hashes; sessions store only a SHA-256 of the session cookie token.
+-- Accounts. Passwords are scrypt hashes.
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
@@ -60,11 +60,20 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY,
+-- JWT auth: access tokens are stateless; each refresh token's jti is recorded so a login can be
+-- revoked (logout, password reset) and a replayed, already-rotated token revokes its whole family.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    jti UUID PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL
+    family UUID NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS refresh_tokens_family_idx ON refresh_tokens (family);
+CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens (user_id);
+-- Replaced by refresh_tokens (opaque cookie sessions -> JWT).
+DROP TABLE IF EXISTS sessions;
 
 -- A logged-in search is a search_events row with user_id set (ARCHIVE).
 -- hidden_at marks "CLEAR ALL" so the latest batch can be restored (RETURN).

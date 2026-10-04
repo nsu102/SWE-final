@@ -4,6 +4,12 @@ import numpy as np
 import torch
 from PIL import Image
 
+from datetime import timedelta
+from unittest import mock
+
+import jwt
+
+from src.backend import tokens
 from src.backend.auth import FailureLimiter, hash_password, kakao_profile, verify_password
 from src.backend.db import color_distance, rerank_by_color, vector_literal
 from src.backend.ml import crop_to_box
@@ -92,3 +98,31 @@ class BackendUtilityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenTest(unittest.TestCase):
+    def test_access_token_roundtrip(self):
+        self.assertEqual(42, tokens.user_from_access(tokens.access_token(42)))
+
+    def test_expired_access_token_is_rejected(self):
+        with mock.patch.object(tokens, "ACCESS_TTL", timedelta(seconds=-1)):
+            stale = tokens.access_token(42)
+        with self.assertRaises(tokens.TokenError):
+            tokens.user_from_access(stale)
+
+    def test_refresh_token_cannot_be_used_as_access_token(self):
+        refresh = tokens._encode({"sub": "42", "typ": "refresh", "jti": "x", "fam": "y"}, tokens.REFRESH_TTL)
+        with self.assertRaises(tokens.TokenError):
+            tokens.user_from_access(refresh)
+
+    def test_tampered_or_foreign_tokens_are_rejected(self):
+        header, payload, signature = tokens.access_token(42).split(".")
+        with self.assertRaises(tokens.TokenError):
+            tokens.user_from_access(f"{header}.{payload}.{signature[:-2]}AA")
+        forged = jwt.encode({"sub": "1", "typ": "access", "iss": "lookfind", "iat": 0, "exp": 9999999999}, "x" * 32, algorithm="HS256")
+        with self.assertRaises(tokens.TokenError):
+            tokens.user_from_access(forged)
+        unsigned = jwt.encode({"sub": "1", "typ": "access", "iss": "lookfind", "iat": 0, "exp": 9999999999}, None, algorithm="none")
+        with self.assertRaises(tokens.TokenError):
+            tokens.user_from_access(unsigned)
+
