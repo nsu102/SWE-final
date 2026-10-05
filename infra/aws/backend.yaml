@@ -83,7 +83,10 @@ Resources:
       Architectures: [x86_64]
       Role: !GetAtt FunctionRole.Arn
       MemorySize: 3008
-      Timeout: 29
+      # Container imports can exceed Lambda's 10-second init phase. Allow the
+      # suppressed init to finish instead of killing the execution environment;
+      # API Gateway still enforces its own 30-second request limit.
+      Timeout: 120
       EphemeralStorage: {Size: 4096}
       VpcConfig: {SubnetIds: !Ref SubnetIds, SecurityGroupIds: [!Ref LambdaSecurityGroup]}
       # Everything else comes from backend/.env.production (loaded at cold start, see config.load_app_env).
