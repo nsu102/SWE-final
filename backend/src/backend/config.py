@@ -28,6 +28,18 @@ def database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
+
+def cookie_secure() -> bool:
+    """Secure cookies: COOKIE_SECURE=true/false if set, else follow FRONTEND_URL's scheme.
+
+    The browser reaches the API through the frontend origin (Next.js proxy / CloudFront),
+    so by default the cookies follow its scheme.
+    """
+    explicit = os.getenv("COOKIE_SECURE", "").strip().lower()
+    if explicit in {"true", "false"}:
+        return explicit == "true"
+    return os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://")
+
 def jwt_secret(secure: bool) -> str:
     """HS256 signing key. Required in production; a throwaway key is fine for local http dev."""
     secret = os.getenv("JWT_SECRET")
@@ -93,12 +105,11 @@ def get_settings() -> Settings:
         mail_from=os.getenv("MAIL_FROM", "LookFind <no-reply@lookfind.local>"),
         # How much garment colour difference lowers the score (0 = embedding only).
         color_weight=float(os.getenv("COLOR_WEIGHT", "0.15")),
-        # The browser reaches the API through the frontend origin (Next.js proxy), so cookies follow its scheme.
-        cookie_secure=os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://"),
+        cookie_secure=cookie_secure(),
         kakao_rest_api_key=os.getenv("KAKAO_REST_API_KEY") or None,
         kakao_client_secret=os.getenv("KAKAO_CLIENT_SECRET") or None,
         # Must match a Redirect URI registered in Kakao Developers; the frontend proxies it to the backend.
         kakao_redirect_uri=os.getenv("KAKAO_REDIRECT_URI")
         or os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/") + "/api/auth/kakao/callback",
-        jwt_secret=jwt_secret(os.getenv("FRONTEND_URL", "http://localhost:3000").startswith("https://")),
+        jwt_secret=jwt_secret(cookie_secure()),
     )

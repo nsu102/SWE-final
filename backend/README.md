@@ -157,6 +157,7 @@ Nginx는 외부 요청을 API 컨테이너로 전달하고, API 컨테이너는 
 | `AWS_REGION` | S3 리전 |
 | `LOCAL_STORAGE_ROOT` | 로컬 상품 이미지 루트 |
 | `CORS_ORIGINS` | 브라우저가 백엔드를 직접 호출할 때만 필요한 origin 목록 (Next.js 프록시 사용 시 불필요) |
+| `COOKIE_SECURE` | 인증 쿠키의 Secure 플래그(`true`/`false`). 비우면 `FRONTEND_URL`이 https일 때 true |
 | `JWT_SECRET` | JWT 서명 키(32자 이상). https 배포에서는 필수, 로컬 http에서는 없으면 임시 키 사용 |
 | `FRONTEND_URL` | 프런트엔드 주소 (재설정 메일 링크, 카카오 Redirect URI, 쿠키 Secure 여부) |
 | `KAKAO_REST_API_KEY`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI` | 카카오 로그인 REST API 키 / Client Secret(선택) / Redirect URI(선택) |
