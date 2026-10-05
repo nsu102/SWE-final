@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hmac
+import json
 import logging
+import os
 import secrets
 from urllib.parse import urlencode
 
@@ -21,6 +23,35 @@ logger = logging.getLogger("uvicorn.error")
 
 KAKAO_STATE_COOKIE = "lookfind_kakao_state"
 KAKAO_COOKIE_PATH = "/api/auth/kakao"
+
+
+def exchange_kakao_profile(code: str) -> dict:
+    payload = {
+        "client_id": settings.kakao_rest_api_key,
+        "client_secret": settings.kakao_client_secret,
+        "redirect_uri": settings.kakao_redirect_uri,
+        "code": code,
+    }
+    function_name = os.getenv("KAKAO_EXCHANGE_FUNCTION")
+    if function_name:
+        import boto3
+
+        response = boto3.client("lambda", region_name=settings.aws_region).invoke(
+            FunctionName=function_name,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(payload).encode(),
+        )
+        body = json.loads(response["Payload"].read())
+        if response.get("FunctionError"):
+            raise RuntimeError(body.get("errorMessage", "Kakao exchange Lambda failed"))
+        return body
+    token = httpx.post("https://kauth.kakao.com/oauth/token", timeout=10, data={
+        "grant_type": "authorization_code", "client_id": settings.kakao_rest_api_key,
+        "redirect_uri": settings.kakao_redirect_uri, "code": code,
+        **({"client_secret": settings.kakao_client_secret} if settings.kakao_client_secret else {}),
+    }).raise_for_status().json()["access_token"]
+    return httpx.get("https://kapi.kakao.com/v2/user/me", timeout=10,
+                     headers={"Authorization": f"Bearer {token}"}).raise_for_status().json()
 
 
 def kakao_failed() -> RedirectResponse:
@@ -54,15 +85,9 @@ def kakao_callback(
     if error or not code or not expected_state or not hmac.compare_digest(state, expected_state):
         return kakao_failed()
     try:
-        token = httpx.post("https://kauth.kakao.com/oauth/token", timeout=10, data={
-            "grant_type": "authorization_code", "client_id": settings.kakao_rest_api_key,
-            "redirect_uri": settings.kakao_redirect_uri, "code": code,
-            **({"client_secret": settings.kakao_client_secret} if settings.kakao_client_secret else {}),
-        }).raise_for_status().json()["access_token"]
-        profile = httpx.get("https://kapi.kakao.com/v2/user/me", timeout=10,
-                            headers={"Authorization": f"Bearer {token}"}).raise_for_status().json()
+        profile = exchange_kakao_profile(code)
         user_id = kakao_user(profile)
-    except (httpx.HTTPError, KeyError, ValueError):
+    except (httpx.HTTPError, KeyError, ValueError, RuntimeError):
         logger.exception("Kakao login failed")
         return kakao_failed()
     response = RedirectResponse(f"{settings.frontend_url}/", status_code=302)

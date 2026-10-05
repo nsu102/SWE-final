@@ -7,6 +7,7 @@ embedded whole, like the thumbnails the model was trained on.
 """
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass
 
@@ -18,7 +19,13 @@ import torchvision.transforms as v2
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from PIL import Image
-from transformers import AutoImageProcessor, AutoModelForObjectDetection, SwinConfig, SwinModel
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForObjectDetection,
+    ConditionalDetrConfig,
+    SwinConfig,
+    SwinModel,
+)
 
 from src.backend.config import get_settings
 from src.common.human_parser import select_device
@@ -92,7 +99,16 @@ class FashionModels:
         self.device = select_device()
         self._lock = threading.Lock()
         self.detector_processor = AutoImageProcessor.from_pretrained(DETECTOR)
-        self.detector = AutoModelForObjectDetection.from_pretrained(DETECTOR).to(self.device).eval()
+        # transformers 5.x probes whether the detector's `resnet50` backbone is
+        # a Hub repository when backbone_kwargs is present. Runtime is offline,
+        # and this detector uses timm, so construct that config explicitly.
+        with open(hf_hub_download(DETECTOR, "config.json"), encoding="utf-8") as stream:
+            detector_data = json.load(stream)
+        detector_data["backbone_kwargs"] = {}
+        detector_config = ConditionalDetrConfig.from_dict(detector_data)
+        self.detector = AutoModelForObjectDetection.from_pretrained(
+            DETECTOR, config=detector_config, local_files_only=True
+        ).to(self.device).eval()
         self.labels = self.detector.config.id2label
 
         config = SwinConfig.from_pretrained(settings.fashion_clip_model)
