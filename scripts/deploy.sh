@@ -85,7 +85,7 @@ cmd_env() {
 cmd_backend() {
   check_env_file
   local account registry tag image
-  account="$(aws sts get-caller-identity --query Account --output text)"
+  account="$(aws sts get-caller-identity --region "$REGION" --query Account --output text)"
   registry="$account.dkr.ecr.$REGION.amazonaws.com"
   tag="$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"   # unique: Lambda pins the image digest per update
   image="$registry/$ECR_REPO:$tag"
@@ -125,9 +125,9 @@ cmd_frontend() {
   bucket="$(stack_output "$FRONTEND_REGION" "$FRONTEND_STACK" BucketName)"
   distribution="$(stack_output "$FRONTEND_REGION" "$FRONTEND_STACK" DistributionId)"
   log "Uploading frontend/out to s3://$bucket"
-  aws s3 sync frontend/out "s3://$bucket" --delete
+  aws s3 sync frontend/out "s3://$bucket" --region "$FRONTEND_REGION" --delete
   log "Invalidating CloudFront $distribution"
-  aws cloudfront create-invalidation --distribution-id "$distribution" --paths "/*" --query Invalidation.Id --output text
+  aws cloudfront create-invalidation --region "$FRONTEND_REGION" --distribution-id "$distribution" --paths "/*" --query Invalidation.Id --output text
   log "Done: $(stack_output "$FRONTEND_REGION" "$FRONTEND_STACK" Url)"
 }
 
