@@ -7,3 +7,7 @@ logs/
 *.py[cod]
 deploy/backend/.env
 deploy/backend/certs/
+
+# Any env file except the committed templates (e.g. .env.production holds production secrets)
+.env.*
+!.env.example
