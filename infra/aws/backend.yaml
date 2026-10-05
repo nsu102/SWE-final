@@ -4,11 +4,10 @@ Parameters:
   ImageUri: {Type: String}
   SubnetIds: {Type: List<AWS::EC2::Subnet::Id>}
   VpcId: {Type: AWS::EC2::VPC::Id}
-  ProductBucketName: {Type: String, Default: software2026}
-  KakaoRestApiKey: {Type: String, NoEcho: true}
-  KakaoClientSecret: {Type: String, NoEcho: true, Default: ""}
-  KakaoRedirectUri: {Type: String, Default: https://lookfind.site/api/auth/kakao/callback}
-  JwtSecret: {Type: String, NoEcho: true, MinLength: 32, Description: HS256 key for access/refresh tokens}
+  ProductBucketName: {Type: String, Default: software2026, Description: AWS_BUCKET_NAME from backend/.env.production (IAM read scope)}
+  # App settings live in backend/.env.production; scripts/deploy.sh stores it in this secret.
+  AppEnvSecretArn: {Type: String, Description: Secrets Manager ARN holding backend/.env.production}
+  AppEnvVersion: {Type: String, Default: "0", Description: Hash of .env.production; a new value restarts Lambda so it reloads the file}
 Resources:
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -73,7 +72,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - {Effect: Allow, Action: [secretsmanager:GetSecretValue], Resource: !GetAtt Database.MasterUserSecret.SecretArn}
+              - {Effect: Allow, Action: [secretsmanager:GetSecretValue], Resource: [!GetAtt Database.MasterUserSecret.SecretArn, !Ref AppEnvSecretArn]}
               - {Effect: Allow, Action: [s3:GetObject], Resource: !Sub 'arn:${AWS::Partition}:s3:::${ProductBucketName}/*'}
   ApiFunction:
     Type: AWS::Lambda::Function
@@ -87,27 +86,15 @@ Resources:
       Timeout: 29
       EphemeralStorage: {Size: 4096}
       VpcConfig: {SubnetIds: !Ref SubnetIds, SecurityGroupIds: [!Ref LambdaSecurityGroup]}
+      # Everything else comes from backend/.env.production (loaded at cold start, see config.load_app_env).
+      # Only values that exist after deployment are set here.
       Environment:
         Variables:
+          APP_ENV_SECRET_ARN: !Ref AppEnvSecretArn
+          APP_ENV_VERSION: !Ref AppEnvVersion
           DATABASE_SECRET_ARN: !GetAtt Database.MasterUserSecret.SecretArn
           DATABASE_HOST: !GetAtt Database.Endpoint.Address
           DATABASE_PORT: !GetAtt Database.Endpoint.Port
-          DATABASE_NAME: fashion
-          AUTO_MIGRATE: "true"
-          AWS_BUCKET_NAME: !Ref ProductBucketName
-          LOCAL_STORAGE_ROOT: /tmp/storage
-          FRONTEND_URL: https://lookfind.site
-          CORS_ORIGINS: https://lookfind.site
-          KAKAO_REST_API_KEY: !Ref KakaoRestApiKey
-          KAKAO_CLIENT_SECRET: !Ref KakaoClientSecret
-          KAKAO_REDIRECT_URI: !Ref KakaoRedirectUri
-          JWT_SECRET: !Ref JwtSecret
-          MAX_UPLOAD_MB: "4"
-          FASHION_CLIP_MODEL: yainage90/fashion-image-feature-extractor
-          OMP_NUM_THREADS: "2"
-          TOKENIZERS_PARALLELISM: "false"
-          HF_HUB_OFFLINE: "1"
-          TRANSFORMERS_OFFLINE: "1"
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties: {Name: lookfind-api, ProtocolType: HTTP}

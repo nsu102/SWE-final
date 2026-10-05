@@ -1,7 +1,7 @@
 PYTHON ?= python3
 VENV := backend/work/.venv/bin
 
-.PHONY: setup db backend frontend test rebuild-catalog
+.PHONY: setup db backend frontend test rebuild-catalog deploy
 
 # 백엔드 venv(크롤러도 같이 사용), 프런트 의존성, 로컬 .env 준비
 setup:
@@ -26,6 +26,10 @@ test:
 	cd backend && work/.venv/bin/python -m unittest discover -s tests
 	cd crawler && ../$(VENV)/python -m unittest discover -s tests
 	cd frontend && npm run lint && npm run build
+
+# AWS 배포 (backend/.env.production 기준). 부분 배포: scripts/deploy.sh env|backend|frontend|check
+deploy:
+	bash scripts/deploy.sh
 
 # 사람 없는 사진으로 무신사 재선별 → 재임베딩 (로컬, 재실행 시 이어서)
 rebuild-catalog:

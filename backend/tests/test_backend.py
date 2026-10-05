@@ -9,7 +9,7 @@ from unittest import mock
 
 import jwt
 
-from src.backend import tokens
+from src.backend import config, tokens
 from src.backend.auth import FailureLimiter, hash_password, kakao_profile, verify_password
 from src.backend.db import color_distance, rerank_by_color, vector_literal
 from src.backend.ml import crop_to_box
@@ -125,4 +125,37 @@ class TokenTest(unittest.TestCase):
         unsigned = jwt.encode({"sub": "1", "typ": "access", "iss": "lookfind", "iat": 0, "exp": 9999999999}, None, algorithm="none")
         with self.assertRaises(tokens.TokenError):
             tokens.user_from_access(unsigned)
+
+
+class ProductionEnvTest(unittest.TestCase):
+    ENV_FILE = """# comment
+FRONTEND_URL=https://lookfind.site
+MAIL_FROM="LookFind <a@b.c>"
+SMTP_HOST=
+DATABASE_HOST=stale-copy.example
+JWT_SECRET=abc=def
+"""
+
+    def test_parse_env(self):
+        self.assertEqual(
+            {"FRONTEND_URL": "https://lookfind.site", "MAIL_FROM": "LookFind <a@b.c>", "SMTP_HOST": "",
+             "DATABASE_HOST": "stale-copy.example", "JWT_SECRET": "abc=def"},
+            config.parse_env(self.ENV_FILE),
+        )
+
+    def test_load_app_env_applies_file_but_stack_keys_and_empty_values_do_not_override(self):
+        secrets_manager = mock.Mock()
+        secrets_manager.get_secret_value.return_value = {"SecretString": self.ENV_FILE}
+        env = {"APP_ENV_SECRET_ARN": "arn:secret", "DATABASE_HOST": "live-rds.example",
+               "FRONTEND_URL": "http://old", "SMTP_HOST": "smtp.kept"}
+        config.load_app_env.cache_clear()
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch("boto3.client", return_value=secrets_manager):
+            config.load_app_env()
+            import os
+            self.assertEqual("https://lookfind.site", os.environ["FRONTEND_URL"])  # file wins
+            self.assertEqual("live-rds.example", os.environ["DATABASE_HOST"])      # stack wins
+            self.assertEqual("smtp.kept", os.environ["SMTP_HOST"])                 # empty skipped
+            self.assertEqual("abc=def", os.environ["JWT_SECRET"])
+        secrets_manager.get_secret_value.assert_called_once_with(SecretId="arn:secret")
+        config.load_app_env.cache_clear()
 

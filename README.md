@@ -49,8 +49,18 @@ make test       # 백엔드·크롤러 unittest, 프런트 lint + build
 
 ## 배포
 
-- 백엔드: `backend/deploy/backend/` — EC2(Docker + Nginx) + RDS(PostgreSQL 16 + pgvector), S3는 IAM Role로 접근
-- 프런트엔드: Vercel 등 — `BACKEND_URL`을 백엔드 도메인으로 설정(Next.js가 `/api`, `/media`를 프록시). 백엔드 `FRONTEND_URL`을 프런트 도메인으로 설정하고 카카오 Redirect URI `{FRONTEND_URL}/api/auth/kakao/callback`을 등록
+AWS 서버리스(CloudFront + S3 / API Gateway + Lambda + RDS)로 배포하며, **운영 설정은 `backend/.env.production` 하나**입니다(git 제외).
+
+```bash
+scripts/deploy.sh check      # .env.production 검증 (AWS 호출 없음)
+scripts/deploy.sh            # 전체: 설정 업로드 + Lambda 이미지 + 프런트엔드
+scripts/deploy.sh env        # 설정만 바꿨을 때: 업로드 + Lambda 재시작
+```
+
+- 배포 스크립트가 `.env.production`을 Secrets Manager(`lookfind/backend-env`)에 올리고, Lambda는 콜드 스타트 때 이를 읽어 환경변수로 적용합니다(`config.load_app_env`). 스택은 배포 후에야 생기는 값(RDS 주소·비밀번호 secret)만 직접 넣습니다.
+- 첫 배포에는 `VPC_ID`, `SUBNET_IDS`(백엔드), `HOSTED_ZONE_ID`(프런트) 환경변수가 필요합니다. 스택 이름은 `BACKEND_STACK`(기본 `lookfind-backend`), `FRONTEND_STACK`(기본 `lookfind-frontend`)으로 바꿀 수 있습니다.
+- 필요: AWS CLI v2, Docker buildx, CloudFormation·ECR·Lambda·RDS·Secrets Manager·S3·CloudFront 권한.
+- 카카오 Developers에 Redirect URI `https://lookfind.site/api/auth/kakao/callback`을 등록해야 합니다.
 
 ## 저장소 이력
 

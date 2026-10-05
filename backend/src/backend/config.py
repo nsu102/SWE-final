@@ -10,6 +10,43 @@ from pathlib import Path
 from urllib.parse import quote
 
 
+APP_ENV_SECRET = "APP_ENV_SECRET_ARN"
+# Set by the backend stack from live resources; a copy in .env.production must not override them.
+STACK_KEYS = {"APP_ENV_SECRET_ARN", "DATABASE_SECRET_ARN", "DATABASE_HOST", "DATABASE_PORT"}
+
+
+def parse_env(text: str) -> dict[str, str]:
+    """KEY=VALUE lines (the dotenv subset our .env files use): blank/# lines skipped, outer quotes removed."""
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+@lru_cache
+def load_app_env() -> None:
+    """Production: apply backend/.env.production, which scripts/deploy.sh stores in Secrets Manager.
+
+    Its non-empty values override the process environment, so the file is the single source of
+    production settings. Only STACK_KEYS (live resource ids the stack sets) take precedence.
+    Locally APP_ENV_SECRET_ARN is unset and `make backend` sources .env instead.
+    """
+    arn = os.getenv(APP_ENV_SECRET)
+    if not arn:
+        return
+    import boto3
+    secret = boto3.client("secretsmanager", region_name=os.getenv("AWS_REGION"))
+    values = parse_env(secret.get_secret_value(SecretId=arn)["SecretString"])
+    # Empty means "not configured" (e.g. SMTP_HOST=); stack-provided keys always win.
+    os.environ.update({key: value for key, value in values.items()
+                       if value and not (key in STACK_KEYS and os.getenv(key))})
+
 def database_url() -> str:
     direct = os.getenv("DATABASE_URL")
     if direct:
@@ -81,6 +118,7 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    load_app_env()
     origins = tuple(
         value.strip() for value in os.getenv(
             "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
