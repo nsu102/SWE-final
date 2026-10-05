@@ -35,6 +35,15 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds: [!Select [0, !Ref SubnetIds]]
       SecurityGroupIds: [!Ref SecretEndpointSecurityGroup]
+  LambdaEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.lambda'
+      PrivateDnsEnabled: true
+      SubnetIds: [!Select [0, !Ref SubnetIds]]
+      SecurityGroupIds: [!Ref SecretEndpointSecurityGroup]
   DatabaseSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties: {DBSubnetGroupDescription: LookFind database subnets, SubnetIds: !Ref SubnetIds}
@@ -74,6 +83,24 @@ Resources:
             Statement:
               - {Effect: Allow, Action: [secretsmanager:GetSecretValue], Resource: [!GetAtt Database.MasterUserSecret.SecretArn, !Ref AppEnvSecretArn]}
               - {Effect: Allow, Action: [s3:GetObject], Resource: !Sub 'arn:${AWS::Partition}:s3:::${ProductBucketName}/*'}
+              - {Effect: Allow, Action: [lambda:InvokeFunction], Resource: !GetAtt KakaoExchangeFunction.Arn}
+  KakaoExchangeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+  KakaoExchangeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      ImageConfig: {Command: [src.backend.kakao_exchange_handler.handler]}
+      Architectures: [x86_64]
+      Role: !GetAtt KakaoExchangeRole.Arn
+      MemorySize: 512
+      Timeout: 25
   ApiFunction:
     Type: AWS::Lambda::Function
     DependsOn: Database
@@ -98,6 +125,7 @@ Resources:
           DATABASE_SECRET_ARN: !GetAtt Database.MasterUserSecret.SecretArn
           DATABASE_HOST: !GetAtt Database.Endpoint.Address
           DATABASE_PORT: !GetAtt Database.Endpoint.Port
+          KAKAO_EXCHANGE_FUNCTION: !Ref KakaoExchangeFunction
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties: {Name: lookfind-api, ProtocolType: HTTP}
@@ -123,6 +151,22 @@ Resources:
       FunctionName: !Ref ApiFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*'
+  ModelWarmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ApiFunction.Arn
+          Id: LookFindModelWarmup
+          Input: '{"source":"aws.events","detail-type":"LookFindModelWarmup"}'
+  ModelWarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ApiFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ModelWarmRule.Arn
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties: {LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14}
