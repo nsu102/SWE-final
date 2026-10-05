@@ -74,7 +74,9 @@ def kakao_user(profile: dict) -> int:
     kakao_id, email, name, avatar = kakao_profile(profile)
     with connect_db() as connection:
         row = connection.execute(
-            "UPDATE users SET display_name = %s, avatar_url = %s WHERE kakao_id = %s RETURNING id",
+            # Fill only what the user hasn't set: names/photos edited on MY PAGE survive later Kakao logins.
+            "UPDATE users SET display_name = COALESCE(display_name, %s), avatar_url = COALESCE(avatar_url, %s) "
+            "WHERE kakao_id = %s RETURNING id",
             (name, avatar, kakao_id),
         ).fetchone()
         if not row and email:

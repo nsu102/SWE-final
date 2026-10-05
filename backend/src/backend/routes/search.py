@@ -1,7 +1,6 @@
 """Photo search and catalog images."""
 from __future__ import annotations
 
-import base64
 import io
 import time
 import uuid
@@ -16,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from src.backend.auth import optional_user
 from src.backend.config import get_settings
 from src.backend.db import connect_db, search_similar
+from src.backend.images import preview_data_url
 from src.backend.ml import get_models
 from src.backend.products import to_result
 from src.backend.schemas import SearchResponse
@@ -30,15 +30,6 @@ def infer(source: Image.Image):
     prepared = models.prepare_query(source)
     embedding = models.embed([prepared.search_image])[0].tolist()
     return prepared, embedding
-
-
-def preview_data_url(image: Image.Image) -> str:
-    preview = image.copy()
-    preview.thumbnail((480, 480))
-    output = io.BytesIO()
-    preview.convert("RGB").save(output, format="JPEG", quality=88, optimize=True)
-    encoded = base64.b64encode(output.getvalue()).decode("ascii")
-    return f"data:image/jpeg;base64,{encoded}"
 
 
 @router.post("/api/search", response_model=SearchResponse)

@@ -159,3 +159,26 @@ JWT_SECRET=abc=def
         secrets_manager.get_secret_value.assert_called_once_with(SecretId="arn:secret")
         config.load_app_env.cache_clear()
 
+
+class ProfileTest(unittest.TestCase):
+    def test_avatar_is_a_center_cropped_square_jpeg(self):
+        import base64, io
+        from src.backend.images import AVATAR_SIZE, avatar_data_url
+        source = io.BytesIO()
+        Image.new("RGB", (400, 200), "red").save(source, format="PNG")
+        url = avatar_data_url(source.getvalue())
+        self.assertTrue(url.startswith("data:image/jpeg;base64,"))
+        with Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))) as avatar:
+            self.assertEqual((AVATAR_SIZE, AVATAR_SIZE), avatar.size)
+        with self.assertRaises(ValueError):
+            avatar_data_url(b"not an image")
+
+    def test_display_name_validation(self):
+        from fastapi import HTTPException
+        from src.backend.routes.account import valid_display_name
+        self.assertEqual("신 윤수", valid_display_name("  신   윤수 "))
+        self.assertEqual("a b", valid_display_name("a\nb"))  # whitespace (incl. newlines) collapses
+        for bad in ["   ", "x" * 31, "a\u200bb", "a\x07b"]:  # empty, too long, zero-width, control
+            with self.assertRaises(HTTPException):
+                valid_display_name(bad)
+

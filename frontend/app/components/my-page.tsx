@@ -1,6 +1,7 @@
 "use client";
 
 import type { User } from "../types/api";
+import UserAvatar from "./user-avatar";
 
 type MyPageProps = {
   user: User;
@@ -8,15 +9,19 @@ type MyPageProps = {
   onHistory: () => void;
   onSaved: () => void;
   onLogout: () => void;
+  onEdit: () => void;
 };
 
-export default function MyPage({ user, busy, onHistory, onSaved, onLogout }: MyPageProps) {
+export default function MyPage({ user, busy, onHistory, onSaved, onLogout, onEdit }: MyPageProps) {
   return <section className="my-page">
     <div className="my-page-heading"><h1>MY PAGE</h1></div>
     <div className="my-page-layout">
       <section className="my-profile" aria-labelledby="my-profile-title">
-        <div className="my-profile-avatar" aria-hidden="true">{user.avatar_url ? <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" /> : (user.display_name || user.email).charAt(0).toUpperCase()}</div>
-        <h2 id="my-profile-title">내 계정</h2>
+        <div className="my-profile-top">
+          <UserAvatar user={user} className="my-profile-avatar" />
+          <button className="my-profile-edit" onClick={onEdit}>프로필 수정 <span aria-hidden="true">✎</span></button>
+        </div>
+        <h2 id="my-profile-title">{user.display_name || "내 계정"}</h2>
         <dl>{user.display_name && <><dt>NAME</dt><dd>{user.display_name}</dd></>}{user.email && <><dt>EMAIL</dt><dd>{user.email}</dd></>}</dl>
         <button className="photo-action" disabled={busy} onClick={onLogout}>{busy ? "처리 중…" : "LOGOUT"}<span aria-hidden="true">↗</span></button>
       </section>

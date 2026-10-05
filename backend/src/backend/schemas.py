@@ -39,6 +39,10 @@ class User(BaseModel):
     avatar_url: str | None = None
 
 
+class ProfileUpdate(BaseModel):
+    display_name: str
+
+
 class ResetRequest(BaseModel):
     email: str
 

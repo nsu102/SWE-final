@@ -33,6 +33,7 @@ type LookFind = {
   openHistory: (id: string) => void;
   toggleFavorite: (item: Product) => void;
   setNotice: (notice: string) => void;
+  updateUser: (user: User) => void;
   closeOverlays: () => void;
   overlayOpen: boolean;
 };
@@ -175,6 +176,7 @@ export default function LookFindProvider({ children }: { children: ReactNode }) 
   }, [runSearch]);
 
   const value: LookFind = {
+    updateUser: setUser,
     user, authLoading, favorites, search, openLogin, logout, runSearch, retrySearch, openHistory, toggleFavorite, setNotice,
     openUpload: () => setUploadOpen(true),
     closeOverlays: () => { setLoginOpen(false); setUploadOpen(false); },

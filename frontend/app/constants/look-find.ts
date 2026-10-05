@@ -13,3 +13,6 @@ export const CARD_FLIP_DURATION = 420;
 export const GRID_SCROLL_RESET = 260;
 export const CARD_STAGGER = 65;
 export const HISTORY_RESTORE_CHUNK = 1000; // backend accepts at most this many ids per restore call
+// MY PAGE profile editing (backend: routes/account.py).
+export const PROFILE_NAME_MAX = 30;
+export const AVATAR_UPLOAD_SIDE = 512; // the server crops to a 256px square

@@ -185,3 +185,37 @@ button:disabled { cursor: wait; opacity: .55; }
 /* Route links styled like the former buttons */
 .wordmark, nav a, .account-popover a { text-decoration: none; color: var(--ink); }
 nav a { display: flex; align-items: center; }
+
+/* MY PAGE profile editing */
+.my-profile-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.my-profile-edit { padding: 9px 14px; border: 1px solid rgba(0, 26, 35, .18); border-radius: 999px; background: rgba(255, 255, 255, .55); color: var(--ink); font-size: 12px; font-weight: 700; transition: background .18s ease; }
+.my-profile-edit:hover, .my-profile-edit:focus-visible { background: var(--mint); outline: none; }
+.my-profile-avatar { flex: none; }
+
+/* margin:auto restores the UA centering of modal dialogs that Tailwind preflight resets to 0. */
+.profile-modal { margin: auto; width: min(440px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid rgba(0, 26, 35, .12); border-radius: 24px; background: var(--paper); color: var(--ink); box-shadow: 0 24px 60px rgba(0, 26, 35, .28); }
+.profile-modal::backdrop { background: rgba(0, 26, 35, .42); backdrop-filter: blur(3px); }
+.profile-modal[open] { animation: profile-modal-in .22s cubic-bezier(.2, .8, .25, 1); }
+@keyframes profile-modal-in { from { opacity: 0; transform: translateY(12px) scale(.98); } }
+.profile-modal form { display: grid; gap: 22px; padding: 26px; }
+.profile-modal-head { display: flex; align-items: center; justify-content: space-between; }
+.profile-modal-head h2 { margin: 0; font-size: 20px; }
+.profile-modal-close { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 24px; }
+.profile-modal-close:hover { background: rgba(0, 26, 35, .06); }
+.profile-modal-photo { display: flex; align-items: center; gap: 20px; }
+.profile-modal-avatar { display: grid; place-items: center; flex: none; width: 88px; height: 88px; overflow: hidden; border-radius: 50%; background: var(--mint); font-size: 34px; box-shadow: inset 0 1px 1px rgba(255, 255, 255, .56), 0 4px 12px rgba(0, 26, 35, .14); }
+.profile-modal-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.profile-modal-photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.profile-modal-photo-actions small { flex-basis: 100%; color: #527075; font-size: 11px; }
+.profile-modal-secondary { padding: 10px 16px; border: 1px solid rgba(0, 26, 35, .2); border-radius: 999px; background: #fff; color: var(--ink); font-size: 12px; font-weight: 700; }
+.profile-modal-secondary:hover { background: #f4f8f8; }
+.profile-modal-text { padding: 0; border: 0; background: none; color: #912d2d; font-size: 12px; text-decoration: underline; }
+.profile-modal-field { display: grid; gap: 8px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+.profile-modal-field span { display: flex; justify-content: space-between; }
+.profile-modal-field small { color: #527075; font-weight: 500; letter-spacing: 0; }
+.profile-modal-field input { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font-size: 15px; font-weight: 500; letter-spacing: 0; }
+.profile-modal-field input:focus { border-color: var(--ink); outline: 2px solid var(--mint); }
+.profile-modal .api-error { margin: -8px 0 0; }
+.profile-modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.profile-modal-actions .photo-action { padding: 12px 22px; }
+@media (prefers-reduced-motion: reduce) { .profile-modal[open] { animation: none; } }

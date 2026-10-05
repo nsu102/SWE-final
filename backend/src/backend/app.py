@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.backend.config import get_settings
 from src.backend.db import count_products, initialize_database
-from src.backend.routes import auth, favorites, history, kakao, search
+from src.backend.routes import account, auth, favorites, history, kakao, search
 
 
 @asynccontextmanager
@@ -28,7 +28,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
-for module in (auth, kakao, search, history, favorites):
+for module in (auth, account, kakao, search, history, favorites):
     app.include_router(module.router)
 
 
