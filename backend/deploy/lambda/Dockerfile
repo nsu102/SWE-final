@@ -6,4 +6,6 @@ RUN pip install --no-cache-dir torch torchvision --index-url https://download.py
 COPY deploy/lambda/cache_models.py /tmp/cache_models.py
 RUN python /tmp/cache_models.py && chmod -R a+rX /opt/huggingface
 COPY src ${LAMBDA_TASK_ROOT}/src
+# Catalog seed (34,777 products, ~12MB) for SeedFunction: the private RDS is only reachable from the VPC.
+COPY seed ${LAMBDA_TASK_ROOT}/seed
 CMD ["src.backend.lambda_handler.handler"]

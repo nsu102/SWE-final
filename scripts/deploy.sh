@@ -6,6 +6,7 @@
 #   scripts/deploy.sh backend    # env + build/push the Lambda image + update the backend stack
 #   scripts/deploy.sh frontend   # update the frontend stack, build, upload to S3, invalidate CloudFront
 #   scripts/deploy.sh check      # validate backend/.env.production only (no AWS calls)
+#   scripts/deploy.sh seed       # load backend/seed (bundled in the image) into RDS; run after `backend`
 #
 # First deploy of a stack also needs: VPC_ID, SUBNET_IDS (comma-separated) for the backend and
 # HOSTED_ZONE_ID for the frontend. Later deploys reuse the stacks' previous values.
@@ -108,6 +109,19 @@ cmd_backend() {
   aws cloudformation describe-stacks --region "$REGION" --stack-name "$BACKEND_STACK" --query "Stacks[0].Outputs" --output table
 }
 
+cmd_seed() {
+  local function out
+  function="$(stack_output "$REGION" "$BACKEND_STACK" SeedFunctionName)"
+  [[ -n "$function" && "$function" != None ]] || die "no SeedFunctionName output on $BACKEND_STACK (run: $0 backend)"
+  out="$(mktemp)"
+  log "Loading the catalog seed into RDS via $function (takes a few minutes)"
+  aws lambda invoke --region "$REGION" --function-name "$function" --cli-read-timeout 900 \
+    --payload '{}' --cli-binary-format raw-in-base64-out "$out" --query FunctionError --output text \
+    | grep -q None || { cat "$out"; echo; die "seed load failed (see CloudWatch logs of $function)"; }
+  cat "$out"; echo
+  rm -f "$out"
+}
+
 cmd_frontend() {
   local api_domain params bucket distribution
   api_domain="$(stack_output "$REGION" "$BACKEND_STACK" ApiOriginDomain)"
@@ -141,6 +155,7 @@ case "${1:-all}" in
   env) cmd_env ;;
   backend) cmd_backend ;;
   frontend) cmd_frontend ;;
+  seed) cmd_seed ;;
   all) cmd_backend; cmd_frontend ;;
-  *) die "usage: $0 [all|env|backend|frontend|check]" ;;
+  *) die "usage: $0 [all|env|backend|frontend|seed|check]" ;;
 esac

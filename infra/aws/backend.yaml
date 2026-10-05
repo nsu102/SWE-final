@@ -98,6 +98,26 @@ Resources:
           DATABASE_SECRET_ARN: !GetAtt Database.MasterUserSecret.SecretArn
           DATABASE_HOST: !GetAtt Database.Endpoint.Address
           DATABASE_PORT: !GetAtt Database.Endpoint.Port
+  # One-off catalog loader (scripts/deploy.sh seed): same image, seed bundled in it, 15-minute timeout
+  # instead of the API's 29 s. Runs src/jobs/load_seed.py; safe to re-run.
+  SeedFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: Database
+    Properties:
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      ImageConfig: {Command: [src.jobs.load_seed.handler]}
+      Architectures: [x86_64]
+      Role: !GetAtt FunctionRole.Arn
+      MemorySize: 1024
+      Timeout: 900
+      VpcConfig: {SubnetIds: !Ref SubnetIds, SecurityGroupIds: [!Ref LambdaSecurityGroup]}
+      Environment:
+        Variables:
+          APP_ENV_SECRET_ARN: !Ref AppEnvSecretArn
+          DATABASE_SECRET_ARN: !GetAtt Database.MasterUserSecret.SecretArn
+          DATABASE_HOST: !GetAtt Database.Endpoint.Address
+          DATABASE_PORT: !GetAtt Database.Endpoint.Port
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties: {Name: lookfind-api, ProtocolType: HTTP}
@@ -127,6 +147,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties: {LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14}
 Outputs:
+  SeedFunctionName: {Value: !Ref SeedFunction}
   ApiOriginDomain: {Value: !Sub '${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'}
   ApiUrl: {Value: !GetAtt HttpApi.ApiEndpoint}
   DatabaseEndpoint: {Value: !GetAtt Database.Endpoint.Address}

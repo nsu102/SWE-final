@@ -1,6 +1,6 @@
 # LookFind — 이미지 기반 유사 의류 검색
 
-전신 사진을 올리거나 MacBook 카메라로 바로 찍으면 사람 파싱 모델로 상의 영역을 분리하고, Marqo FashionSigLIP 임베딩과 pgvector 유사도 검색으로 비슷한 무신사 상품을 찾아주는 서비스입니다.
+전신 사진을 올리거나 MacBook 카메라로 바로 찍으면 의류 검출 모델로 상의·아우터 영역을 잘라내고, 128차원 의류 임베딩(yainage90/fashion-image-feature-extractor)과 pgvector 유사도 검색으로 비슷한 무신사 상품을 찾아주는 서비스입니다.
 
 ```text
 crawler/   무신사·에이블리 상품 수집 → 상의 이미지 선별 → S3 업로드 (products.csv, selections.jsonl)
@@ -9,7 +9,7 @@ frontend/  Next.js 웹 — 사진 업로드/카메라 촬영, 유사 상품 결�
 ```
 
 ```text
-[crawler] ──CSV/JSONL──▶ [backend index_catalog] ──768d 벡터──▶ [PostgreSQL + pgvector]
+[crawler] ──CSV/JSONL──▶ [backend index_catalog] ──128d 벡터──▶ [PostgreSQL + pgvector]
     │                                                                  ▲
     └──이미지──▶ [S3] ◀──presigned URL── [FastAPI /api/search] ─────────┘
                                                 ▲
@@ -22,7 +22,7 @@ Docker, Python 3.12+, Node 20+가 필요합니다.
 
 ```bash
 make setup      # 백엔드 venv, 프런트 npm install, .env 템플릿 복사
-make db         # pgvector 컨테이너 기동 (빈 볼륨이면 전체 카탈로그 49,705개 자동 적재, 첫 기동 몇 분)
+make db         # pgvector 컨테이너 기동 (빈 볼륨이면 카탈로그 34,777개 자동 적재, 첫 기동 1~2분)
 make backend    # http://127.0.0.1:8000  (API 문서: /docs)
 make frontend   # http://localhost:3000  (다른 터미널에서)
 ```
@@ -55,6 +55,7 @@ AWS 서버리스(CloudFront + S3 / API Gateway + Lambda + RDS)로 배포하며, 
 scripts/deploy.sh check      # .env.production 검증 (AWS 호출 없음)
 scripts/deploy.sh            # 전체: 설정 업로드 + Lambda 이미지 + 프런트엔드
 scripts/deploy.sh env        # 설정만 바꿨을 때: 업로드 + Lambda 재시작
+scripts/deploy.sh seed       # 카탈로그 시드를 RDS에 적재 (backend 배포 후 1회, 재실행 가능)
 ```
 
 - 배포 스크립트가 `.env.production`을 Secrets Manager(`lookfind/backend-env`)에 올리고, Lambda는 콜드 스타트 때 이를 읽어 환경변수로 적용합니다(`config.load_app_env`). 스택은 배포 후에야 생기는 값(RDS 주소·비밀번호 secret)만 직접 넣습니다.

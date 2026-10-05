@@ -1,6 +1,6 @@
 # SWE Backend
 
-상의 사진에서 옷 영역을 추출하고 Marqo FashionSigLIP 임베딩으로 유사 상품을 검색하는 백엔드입니다. 상품 원본은 로컬 또는 S3에 둘 수 있고, 상품 정보와 768차원 벡터는 PostgreSQL + pgvector에 저장합니다.
+상의 사진에서 옷 영역을 검출(yainage90/fashion-object-detection)하고 128차원 의류 임베딩(yainage90/fashion-image-feature-extractor)으로 유사 상품을 검색하는 백엔드입니다. 상품 원본은 로컬 또는 S3에 둘 수 있고, 상품 정보와 128차원 벡터는 PostgreSQL + pgvector에 저장합니다.
 
 ## 구성
 
@@ -27,9 +27,9 @@ make db-up
 로컬 DB는 `pgvector/pgvector:pg16` 컨테이너로 실행되며 `127.0.0.1:5432`에서만 접근할 수 있습니다. 최초 볼륨 생성 시 아래 순서로 자동 초기화됩니다.
 
 1. `src/backend/schema.sql`: `vector` 확장, 상품·검색 이력 테이블, HNSW 인덱스 생성
-2. `seed/catalog-*.sql.gz`: S3에 올라간 무신사 상품 전체(49,705개)와 FashionSigLIP 임베딩 적재 (`scripts/load_seed.sh`)
+2. `seed/catalog-*.sql.gz`: 사람 없는 상품 사진으로 선별된 무신사 상의 34,777개와 128차원 임베딩 적재 (`scripts/load_seed.sh`)
 
-따라서 새로 clone한 환경에서는 `make db-up`만 실행해도 전체 카탈로그가 DB에 들어갑니다. 첫 기동은 HNSW 인덱스 생성 때문에 몇 분 걸리며, 적재가 끝나야 healthy가 됩니다. 압축 시드에는 상품 메타데이터, S3 object key, 768차원 임베딩(소수 4자리 반올림, 검색 순위 영향 없음)만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
+따라서 새로 clone한 환경에서는 `make db-up`만 실행해도 전체 카탈로그가 DB에 들어갑니다. 첫 기동은 적재와 HNSW 인덱스 생성 때문에 1~2분 걸리며, 적재가 끝나야 healthy가 됩니다. 운영 RDS에는 같은 시드를 Lambda 이미지에 넣어 `scripts/deploy.sh seed`(`src/jobs/load_seed.py`)로 적재합니다. 압축 시드에는 상품 메타데이터, S3 object key, 128차원 임베딩(소수 4자리 반올림, 상위 24개 결과 99.8% 일치)만 있으며 이미지와 AWS 인증정보는 포함되지 않습니다.
 
 ```bash
 make db-status # 상태 확인
